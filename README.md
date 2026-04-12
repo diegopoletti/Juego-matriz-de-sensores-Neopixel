@@ -1,6 +1,8 @@
 # 🎮 Juego Capacitivo NeoPixel — ESP32
 
 > Juego interactivo de pisada sobre una grilla de sensores capacitivos iluminados con tiras de LEDs RGB, controlado por un ESP32.
+> <img width="1024" height="559" alt="image" src="https://github.com/user-attachments/assets/e6d7d13b-f298-47f8-9f03-c48ee0442550" />
+
 
 ## 📖 ¿Qué hace este proyecto?
 
