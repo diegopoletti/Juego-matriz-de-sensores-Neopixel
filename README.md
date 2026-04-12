@@ -3,6 +3,31 @@
 > Juego interactivo de pisada sobre una grilla de sensores capacitivos iluminados con tiras de LEDs RGB, controlado por un ESP32.
 > <img width="1024" height="559" alt="image" src="https://github.com/user-attachments/assets/e6d7d13b-f298-47f8-9f03-c48ee0442550" />
 
+## 🕹️ Simulador jugable en el navegador
+
+Podés probar el juego directamente desde el navegador, sin necesidad de ningún hardware.
+> https://diegopoletti.github.io/Juego-matriz-de-sensores-Neopixel/simulador.html
+
+### Controles del simulador
+
+| Acción | Teclado | Mobile |
+|---|---|---|
+| Mover selección | `W` `A` `S` `D` o flechas | — |
+| Pisar celda | `Espacio` o `Enter` | Tocar la celda |
+| Iniciar partida | `I` | Botón "Iniciar partida" |
+| Resetear | `R` | Botón "Resetear" |
+
+### Qué simula
+
+El simulador reproduce fielmente la lógica del firmware:
+
+- Grilla de **5 filas × 8 columnas** con 16 LEDs por celda (representados visualmente).
+- **Barra roja** que se mueve de izquierda a derecha y rebota en los extremos.
+- **Celdas verdes** que aparecen aleatoriamente (1 o 2 por vez, nunca en la columna roja).
+- **Dificultad progresiva**: la barra acelera 40 ms por nivel, desde 520 ms hasta 120 ms mínimo.
+- **Historial de partidas** con puntaje, nivel máximo y velocidad final.
+- **Barra de progreso** con los 10 colores del firmware (`coloresProgreso[]`).
+- Animaciones de victoria y derrota.
 
 ## 📖 ¿Qué hace este proyecto?
 
