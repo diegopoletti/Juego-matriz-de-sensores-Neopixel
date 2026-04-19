@@ -9,7 +9,7 @@
  * ---------------------------------------------------------------------------
  *  Una barra roja se mueve de izquierda a derecha y de derecha a izquierda
  *  sobre una grilla de 5 filas × 8 columnas de sensores capacitivos.
- *  Debajo de cada sensor hay una tira de 16 LEDs WS2812B.
+ *  Debajo de cada sensor hay una tira de 20 LEDs WS2812B.
  *
  *  El jugador tiene que pisar la celda verde sin que la barra roja
  *  esté pasando por ahí. Si lo logra, suma un punto. Con 10 puntos, gana.
@@ -21,11 +21,11 @@
  *  - 1× ESP32 DevKit v1 (o compatible)
  *  - 1× Multiplexor analógico CD4051 (8 canales)
  *  - 40× Sensor capacitivo TTP223 (5 filas × 8 columnas)
- *  - 40× Tira de 16 LEDs WS2812B = 640 LEDs en total encadenados
+ *  - 40× Tira de 20 LEDs WS2812B = 800 LEDs en total encadenados
  *  - 1× Resistor de 470 Ω en la línea de datos del primer LED
  *  - 1× Capacitor electrolítico de 1000 µF entre VCC y GND de los LEDs
- *  - 1× Fuente de alimentación de 5 V con al menos 12 A de capacidad
- *    (brillo limitado al 30% → consumo ≈ 11.5 A máximo)
+ *  - 1× Fuente de alimentación de 5 V con al menos 15 A de capacidad
+ *    (brillo limitado al 30% → consumo ≈ 14.4 A máximo)
  *  - 2× Pulsador normalmente abierto con resistencia pull-down de 10 kΩ
  *
  * ---------------------------------------------------------------------------
@@ -42,9 +42,9 @@
  *  Elegir: "Default 4MB with spiffs"
  *  Esto reserva 1.5 MB para SPIFFS, donde se guarda el historial de partidas.
  *
- * @author  Matias Aldana - Diego Poletti - Jony. Garrido
- * @version 2.0.0  (ampliado a 8 columnas)
- * @date    2026
+ * @author  Matías Aldana - Diego Poletti - Jonathan Garrido
+ * @version 2.1.0  (ampliado a 8 columnas, 20 LEDs por celda)
+ * @date    17/04/2026
  * @license MIT
  */
 
@@ -106,9 +106,9 @@
 //  El resistor de 470 Ω protege la línea de datos de picos de voltaje.
 
 #define PIN_NEOPIXEL        26   // Pin de datos (DIN) del primer LED WS2812B
-#define LEDS_POR_CELDA      16   // Cantidad de LEDs que hay debajo de cada sensor
+#define LEDS_POR_CELDA      20   // Cantidad de LEDs que hay debajo de cada sensor
 #define BRILLO_MAXIMO       77   // Brillo = 30% de 255 para no quemar la fuente
-                                 // (640 LEDs × 60 mA × 30% ≈ 11.5 A máximo)
+                                 // (800 LEDs × 60 mA × 30% ≈ 14.4 A máximo)
 
 // ── Pulsadores ──────────────────────────────────────────────────────────
 //  Dos botones físicos: uno para iniciar la partida y otro para resetear.
@@ -130,7 +130,7 @@
 #define FILAS          5               // Cantidad de filas de sensores
 #define COLS           8               // Cantidad de columnas (todas las del CD4051)
 #define TOTAL_CELDAS   (FILAS * COLS)  // 5 × 8 = 40 celdas en total
-#define TOTAL_LEDS     (TOTAL_CELDAS * LEDS_POR_CELDA)  // 40 × 16 = 640 LEDs
+#define TOTAL_LEDS     (TOTAL_CELDAS * LEDS_POR_CELDA)  // 40 × 20 = 800 LEDs
 
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -274,7 +274,7 @@ void avanzarBarraRoja();                    // Mueve la barra roja un paso
 void verificarAccionesJugador();            // Evalúa si el jugador pisó algo
 void colocarCeldasVerdes();                 // Pone 1 o 2 celdas objetivo verdes al azar
 void dibujarLeds();                         // Actualiza los colores de todos los LEDs
-void colorearCelda(int f, int c, uint32_t color); // Pinta los 16 LEDs de una celda
+void colorearCelda(int f, int c, uint32_t color); // Pinta los 20 LEDs de una celda
 void dibujarBarraProgreso();                // Muestra el puntaje en los primeros 10 LEDs
 void iniciarPartida();                      // Prepara todo para una nueva partida
 void terminarPartida(bool gano);            // Cierra la partida y guarda estadísticas
@@ -313,7 +313,7 @@ void setup() {
   Serial.println();                                      // Línea en blanco para separar
   Serial.println(F("=== JuegoCapacitivoNeoPixel v2.0 ===")); // F() guarda el texto en flash
   Serial.println(F("Grilla: 5 filas x 8 columnas = 40 celdas"));
-  Serial.println(F("Total de LEDs: 640"));
+  Serial.println(F("Total de LEDs: 800"));
 
   // ── Configurar pines del multiplexor como SALIDAS ──────────────────────
   //  OUTPUT significa que el ESP32 va a enviar señales por esos pines.
@@ -349,7 +349,7 @@ void setup() {
   tira.setBrightness(BRILLO_MAXIMO); // Limita el brillo al 30% para no quemar la fuente
   tira.clear();                      // Apaga todos los LEDs (pone todos en color negro)
   tira.show();                       // Envía la información a los LEDs físicamente
-  Serial.println(F("NeoPixel: 640 LEDs inicializados correctamente"));
+  Serial.println(F("NeoPixel: 800 LEDs inicializados correctamente"));
 
   // ── Limpiar las matrices de estado ────────────────────────────────────
   //  memset llena un bloque de memoria con un valor específico.
@@ -721,7 +721,7 @@ void dibujarLeds() {
 
   // ── Dibujar la columna roja ───────────────────────────────────────────
   for (int f = 0; f < FILAS; f++) {
-    // Pintar los 16 LEDs de cada celda de la columna roja con color rojo puro
+    // Pintar los 20 LEDs de cada celda de la columna roja con color rojo puro
     colorearCelda(f, columnaRoja, tira.Color(255, 0, 0));   // Rojo: R=255, G=0, B=0
   }
 
@@ -743,7 +743,7 @@ void dibujarLeds() {
 
   // ── Enviar los datos a los LEDs físicos ──────────────────────────────
   // Esta instrucción tarda un tiempo proporcional a la cantidad de LEDs.
-  // Con 640 LEDs tarda aproximadamente 19 ms.
+  // Con 800 LEDs tarda aproximadamente 24 ms.
   tira.show();
 }
 
@@ -754,13 +754,13 @@ void dibujarLeds() {
  * y aplica el color a los LEDS_POR_CELDA LEDs de esa celda.
  *
  * Las celdas están ordenadas de izquierda a derecha, de arriba hacia abajo:
- *   Celda [0][0] → LEDs 0-15
- *   Celda [0][1] → LEDs 16-31
+ *   Celda [0][0] → LEDs 0-19
+ *   Celda [0][1] → LEDs 20-39
  *   ...
- *   Celda [0][7] → LEDs 112-127
- *   Celda [1][0] → LEDs 128-143
+ *   Celda [0][7] → LEDs 140-159
+ *   Celda [1][0] → LEDs 160-179
  *   ...
- *   Celda [4][7] → LEDs 624-639
+ *   Celda [4][7] → LEDs 780-799
  *
  * @param f     Fila de la celda (0 a 4).
  * @param c     Columna de la celda (0 a 7).
@@ -772,9 +772,9 @@ void colorearCelda(int f, int c, uint32_t color) {
   int numeroCelda = f * COLS + c;   // Ej: fila 2, columna 3 → celda nro 19
 
   // Calcular el índice del primer LED de esa celda
-  int primerLed = numeroCelda * LEDS_POR_CELDA;   // Ej: celda 19 → LED 304
+  int primerLed = numeroCelda * LEDS_POR_CELDA;   // Ej: celda 19 → LED 380
 
-  // Asignar el color a cada uno de los 16 LEDs de la celda
+  // Asignar el color a cada uno de los 20 LEDs de la celda
   for (int led = 0; led < LEDS_POR_CELDA; led++) {
     tira.setPixelColor(primerLed + led, color);   // Asignar color al LED
   }
@@ -785,7 +785,7 @@ void colorearCelda(int f, int c, uint32_t color) {
  *
  * Los LEDs 0 al 9 forman la barra de progreso.
  * Cada punto ganado enciende un LED con un color progresivo.
- * Los LEDs 10 al 15 se apagan para no interferir con la barra de progreso.
+ * Los LEDs 10 al 19 se apagan para no interferir con la barra de progreso.
  *
  * Estos LEDs pertenecen a la celda [0][0], que comparte espacio
  * con el primer cuadro de la grilla.
@@ -1137,7 +1137,7 @@ void paginaPrincipal() {
   html += F("</style></head><body>");
 
   html += F("<h1>&#127918; Juego Capacitivo NeoPixel</h1>");
-  html += F("<p class='sub'>Grilla 5 &times; 8 &mdash; 640 LEDs WS2812B &mdash; ESP32 Access Point</p>");
+  html += F("<p class='sub'>Grilla 5 &times; 8 &mdash; 800 LEDs WS2812B &mdash; ESP32 Access Point</p>");
 
   // Tarjetas de estadísticas
   html += F("<div class='stats'>");
@@ -1382,14 +1382,14 @@ String tiempoTranscurrido() {
  * ├──────────────────────┴──────────┴───────────────────────────────────┤
  * │ RESUMEN DE LA GRILLA                                                │
  * │  Filas: 5  —  Columnas: 8  —  Total celdas: 40                     │
- * │  LEDs por celda: 16  —  Total de LEDs: 640                         │
- * │  Corriente máxima (100% blanco): 640 × 60 mA = 38.4 A              │
- * │  Corriente con brillo al 30%:    640 × 60 mA × 0.30 ≈ 11.5 A      │
- * │  Fuente recomendada: 5 V / 12 A o más                              │
+ * │  LEDs por celda: 20  —  Total de LEDs: 800                         │
+ * │  Corriente máxima (100% blanco): 800 × 60 mA = 48.0 A              │
+ * │  Corriente con brillo al 30%:    800 × 60 mA × 0.30 ≈ 14.4 A      │
+ * │  Fuente recomendada: 5 V / 15 A o más                              │
  * ├──────────────────────────────────────────────────────────────────────┤
  * │ MAPA DE ÍNDICES DE LEDs (primera celda de cada fila)               │
- * │  [0][0] → LEDs   0-15    [1][0] → LEDs 128-143                     │
- * │  [0][1] → LEDs  16-31    [2][0] → LEDs 256-271                     │
- * │  [0][7] → LEDs 112-127   [4][7] → LEDs 624-639                     │
+ * │  [0][0] → LEDs   0-19    [1][0] → LEDs 160-179                     │
+ * │  [0][1] → LEDs  20-39    [2][0] → LEDs 320-339                     │
+ * │  [0][7] → LEDs 140-159   [4][7] → LEDs 780-799                     │
  * └──────────────────────────────────────────────────────────────────────┘
  */
