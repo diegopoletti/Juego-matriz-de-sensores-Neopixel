@@ -29,6 +29,8 @@ El simulador reproduce fielmente la lógica del firmware:
 - **Barra de progreso** con los 10 colores del firmware (`coloresProgreso[]`).
 - Animaciones de victoria y derrota.
 
+---
+
 ## 📖 ¿Qué hace este proyecto?
 
 Una **barra roja** se desplaza de izquierda a derecha y de derecha a izquierda sobre una grilla de **5 filas × 8 columnas** de sensores capacitivos. Debajo de cada sensor hay una tira de **20 LEDs WS2812B**.
@@ -40,6 +42,7 @@ El juego incluye:
 - Servidor web integrado vía Wi-Fi (modo Access Point) con historial de partidas.
 - Almacenamiento de estadísticas en la memoria flash del ESP32 (SPIFFS).
 - Panel web accesible desde cualquier dispositivo conectado a la red del ESP32.
+- **Distribución serpenteante de la tira LED** — sin cortes de cable entre filas (novedad v3.0).
 
 ---
 
@@ -55,6 +58,76 @@ Fila 4  [ ○ ]   [ ○ ]   [ ○ ]   [ ○ ]   [ ○ ]   [ ○ ]   [ ○ ]   [ 
 
 ○ = 20 LEDs WS2812B + 1 sensor TTP223 por celda
 Total: 40 celdas · 800 LEDs
+```
+
+---
+
+## 💡 Novedad v3.0 — Distribución serpenteante de la tira LED
+
+### ¿Por qué se cambió?
+
+En la versión anterior (v2.x), la tira recorría la grilla **fila por fila** de izquierda a derecha. Esto obligaba a **cortar y reconectar** la tira 4 veces (una vez al pasar de cada fila a la siguiente), lo que introducía puntos de falla mecánica y complicaba el tendido físico.
+
+### ¿Cómo funciona ahora?
+
+La tira recorre la grilla en **zigzag columna por columna**: baja por las columnas pares y sube por las impares. Al llegar al final de una columna, dobla en U hacia la siguiente sin necesidad de ningún corte.
+
+```
+  Col 0 ↓   Col 1 ↑   Col 2 ↓   Col 3 ↑   Col 4 ↓   Col 5 ↑   Col 6 ↓   Col 7 ↑
+  [0][0]    [4][1]    [0][2]    [4][3]    [0][4]    [4][5]    [0][6]    [4][7]
+  [1][0]    [3][1]    [1][2]    [3][3]    [1][4]    [3][5]    [1][6]    [3][7]
+  [2][0]    [2][1]    [2][2]    [2][3]    [2][4]    [2][5]    [2][6]    [2][7]
+  [3][0]    [1][1]    [3][2]    [1][3]    [3][4]    [1][5]    [3][6]    [1][7]
+  [4][0]    [0][1]    [4][2]    [0][3]    [4][4]    [0][5]    [4][6]    [0][7]
+              ↑ La tira dobla en U aquí, sin corte
+```
+
+### Tabla de índices de celdas físicas
+
+La celda física número N × 20 indica el primer LED de esa celda en la cadena.
+
+```
+        Col 0   Col 1   Col 2   Col 3   Col 4   Col 5   Col 6   Col 7
+Fila 0:   0       9      10      19      20      29      30      39
+Fila 1:   1       8      11      18      21      28      31      38
+Fila 2:   2       7      12      17      22      27      32      37
+Fila 3:   3       6      13      16      23      26      33      36
+Fila 4:   4       5      14      15      24      25      34      35
+```
+
+### Ejemplos de primer LED por celda
+
+| Celda lógica | Celda física | Primer LED | Último LED |
+|---|---|---|---|
+| `[0][0]` | 0 | 0 | 19 |
+| `[4][0]` | 4 | 80 | 99 |
+| `[4][1]` | 5 | 100 | 119 |
+| `[0][1]` | 9 | 180 | 199 |
+| `[0][2]` | 10 | 200 | 219 |
+| `[4][7]` | 35 | 700 | 719 |
+| `[0][7]` | 39 | 780 | 799 |
+
+> **Nota:** La barra de progreso usa los LEDs 0–9 de la celda `[0][0]`, que sigue siendo la primera de la cadena en la distribución serpenteante.
+
+### Función clave: `calcularIndiceLed()`
+
+```cpp
+/**
+ * Columnas pares  (0,2,4,6): la tira BAJA → fila 0 es la primera del grupo.
+ *   numeroCelda = columna * FILAS + fila
+ *
+ * Columnas impares (1,3,5,7): la tira SUBE → fila 4 es la primera del grupo.
+ *   numeroCelda = columna * FILAS + (FILAS - 1 - fila)
+ */
+int calcularIndiceLed(int fila, int columna) {
+  int numeroCelda;
+  if (columna % 2 == 0) {
+    numeroCelda = columna * FILAS + fila;
+  } else {
+    numeroCelda = columna * FILAS + (FILAS - 1 - fila);
+  }
+  return numeroCelda * LEDS_POR_CELDA;
+}
 ```
 
 ---
@@ -186,12 +259,13 @@ Esto reserva **1.5 MB** para el sistema de archivos donde se guarda `historial.c
 Abrir el **Monitor Serie** a `115200 baudios`. Al encender deberían aparecer mensajes como:
 
 ```
-=== JuegoCapacitivoNeoPixel v2.0 ===
+=== JuegoCapacitivoNeoPixel v3.0 ===
 Grilla: 5 filas x 8 columnas = 40 celdas
-Total de LEDs: 800
+Total de LEDs: 800 — Distribucion: SERPENTEANTE por columna
 Inicializando SPIFFS... OK
-Wi-Fi AP iniciado: JuegoNeoPixel
-IP del servidor: 192.168.4.1
+Red: 'JuegoNeoPixel' — IP: 192.168.4.1
+Servidor web iniciado en http://192.168.4.1
+Sistema listo. Presiona BTN_INICIO para jugar.
 ```
 
 ---
@@ -220,7 +294,7 @@ El panel web se **actualiza automáticamente cada 10 segundos**. Es accesible de
 
 ```json
 {
-  "estado": 1,
+  "estado": "jugando",
   "puntaje": 3,
   "nivel": 2,
   "columnaRoja": 5,
@@ -284,7 +358,7 @@ Partida,TiempoDesdeEncendido,Puntaje,Resultado,NivelAlcanzado
 
 ## 🗂️ Estructura del código
 
-El archivo `JuegoCapacitivoNeoPixel_8col.ino` está organizado en **21 secciones** comentadas didácticamente:
+El archivo `JuegoCapacitivoNeoPixel_serpentine.ino` está organizado en **22 secciones** comentadas didácticamente:
 
 | Sección | Contenido |
 |---|---|
@@ -298,77 +372,18 @@ El archivo `JuegoCapacitivoNeoPixel_8col.ino` está organizado en **21 secciones
 | 8 | Declaraciones anticipadas de funciones |
 | 9 | `setup()` — inicialización del sistema |
 | 10 | `loop()` — ciclo principal del juego |
-| 11 | Configuración Wi-Fi (Access Point) |
-| 12 | Configuración del servidor web |
+| 11 | Manejo de botones con debounce |
+| 12 | Multiplexor CD4051 |
 | 13 | Escaneo de sensores capacitivos |
 | 14 | Movimiento de la barra roja |
 | 15 | Lógica principal del juego |
-| 16 | Renderizado de LEDs |
-| 17 | Gestión de partidas (inicio / fin / reset) |
-| 18-19 | Animaciones de victoria y derrota |
-| 20 | Manejador de botones con debounce |
-| 21 | SPIFFS — sistema de archivos flash |
-
----
-
-## 🔊 Mapa de índices de LEDs
-
-Los LEDs están numerados secuencialmente de izquierda a derecha y de arriba hacia abajo:
-
-```
-Celda [fila][col] → LED inicial = (fila × 8 + col) × 20
-
-Ejemplos:
-  [0][0] → LEDs   0 –  19   (primeros 10 usados como barra de progreso)
-  [0][1] → LEDs  20 –  39
-  [0][7] → LEDs 140 – 159
-  [1][0] → LEDs 160 – 179
-  [2][0] → LEDs 320 – 339
-  [4][7] → LEDs 780 – 799
-```
-
----
-
-## ⚠️ Consideraciones eléctricas importantes
-
-### Protección del ESP32 frente al ruido
-
-- **Capacitores de desacople:** Colocar 100 nF cerámico en paralelo con cada CI (CD4051, TTP223) lo más cerca posible de los pines VCC/GND. Los capacitores cerámicos filtran el ruido de alta frecuencia que los electrolíticos no pueden absorber.
-- **Plano de tierra:** En la PCB, usar un plano de GND continuo. Minimizar las impedancias de tierra.
-- **Cable de datos NeoPixel corto:** Mantener el cable entre el pin GPIO26 y el DIN del primer LED lo más corto posible (< 30 cm idealmente). El resistor de 470 Ω forma un filtro RC con la capacitancia del cable.
-
-### Inyección de corriente en los LEDs
-
-Con 800 LEDs, **no alimentar toda la tira desde un único punto**. Dividir en grupos de ≤ 80 LEDs y conectar cada grupo al bus 5V con cables de ≥ 1.5 mm². Esto evita caídas de tensión que pueden causar colores incorrectos en los últimos LEDs o reinicios del ESP32.
-
-### GPIO34 y GPIO35
-
-Estos pines no tienen resistencia pull-down interna. Sin el pull-down de 10 kΩ externo a GND, el pin flota y produce lecturas aleatorias (falsos positivos en los sensores). Es obligatorio colocar la resistencia aunque el TTP223 esté conectado.
-
-### Compatibilidad de tensiones DIN / WS2812B
-
-El WS2812B alimentado a 5V requiere que la señal DIN sea ≥ 3.5V (70% de VCC). El ESP32 entrega 3.3V, lo cual está en el límite. El resistor de 470 Ω mejora el nivel lógico percibido. Si la tira no responde correctamente, agregar un **74HCT125** como convertidor de nivel 3.3V → 5V entre el GPIO26 y el DIN del primer LED.
-
----
-
-## 📁 Archivos del proyecto
-
-```
-JuegoCapacitivoNeoPixel_8col/
-├── JuegoCapacitivoNeoPixel_8col.ino   ← Código fuente principal
-└── README.md                           ← Este archivo
-```
-
----
-
-## 🧩 Dependencias
-
-| Librería          | Versión mínima| Instalación                   |
-|--                -|---            |          --                  -|
-| Adafruit NeoPixel | 1.11          | Gestor de bibliotecas Arduino |
-| ESP32 Arduino Core| 2.0           | Gestor de placas Arduino      |
-| WebServer.h | Incluida en el core | —                             |
-| SPIFFS.h    | Incluida en el core | —                             |
+| 16 | **`calcularIndiceLed()` — mapeo serpenteante** ← nuevo en v3.0 |
+| 17 | Renderizado de LEDs (`dibujarLeds`, `colorearCelda`, `dibujarBarraProgreso`) |
+| 18 | Gestión de partidas (inicio / fin / reset) |
+| 19 | Animaciones de victoria y derrota |
+| 20 | Wi-Fi (modo Access Point) |
+| 21 | Servidor web (rutas, HTML, JSON, CSV) |
+| 22 | SPIFFS — sistema de archivos flash |
 
 ---
 
@@ -395,30 +410,65 @@ const char* CLAVE_RED  = "esp32game";
 
 ---
 
-## 📜 Licencia
+## ⚠️ Consideraciones eléctricas importantes
 
-Este proyecto se distribuye bajo la licencia **MIT**. Podés usarlo, modificarlo y distribuirlo libremente con atribución al autor original.
+### Protección del ESP32 frente al ruido
+
+- **Capacitores de desacople:** Colocar 100 nF cerámico en paralelo con cada CI (CD4051, TTP223) lo más cerca posible de los pines VCC/GND. Los capacitores cerámicos filtran el ruido de alta frecuencia que los electrolíticos no pueden absorber.
+- **Plano de tierra:** En la PCB, usar un plano de GND continuo. Minimizar las impedancias de tierra.
+- **Cable de datos NeoPixel corto:** Mantener el cable entre el pin GPIO26 y el DIN del primer LED lo más corto posible (< 30 cm idealmente). El resistor de 470 Ω forma un filtro RC con la capacitancia del cable.
+
+### Inyección de corriente en los LEDs
+
+Con 800 LEDs, **no alimentar toda la tira desde un único punto**. Dividir en grupos de ≤ 80 LEDs y conectar cada grupo al bus 5V con cables de ≥ 1.5 mm². Esto evita caídas de tensión que pueden causar colores incorrectos en los últimos LEDs o reinicios del ESP32.
+
+> **Con la distribución serpenteante**, los puntos naturales de inyección de corriente coinciden con la doblez de la tira al pasar de una columna a la siguiente, lo que facilita físicamente el acceso al bus de alimentación en esos puntos.
+
+### GPIO34 y GPIO35
+
+Estos pines no tienen resistencia pull-down interna. Sin el pull-down de 10 kΩ externo a GND, el pin flota y produce lecturas aleatorias (falsos positivos en los sensores). Es obligatorio colocar la resistencia aunque el TTP223 esté conectado.
+
+### Compatibilidad de tensiones DIN / WS2812B
+
+El WS2812B alimentado a 5V requiere que la señal DIN sea ≥ 3.5V (70% de VCC). El ESP32 entrega 3.3V, lo cual está en el límite. El resistor de 470 Ω mejora el nivel lógico percibido. Si la tira no responde correctamente, agregar un **74HCT125** como convertidor de nivel 3.3V → 5V entre el GPIO26 y el DIN del primer LED.
+
+---
+
+## 📁 Archivos del proyecto
 
 ```
-MIT License — Copyright (c) 2026
+JuegoCapacitivoNeoPixel/
+├── JuegoCapacitivoNeoPixel_serpentine.ino   ← Código fuente principal (v3.0)
+└── README.md                                 ← Este archivo
 ```
 
 ---
 
-## 👤 Autor
+## 🧩 Dependencias
 
-Proyecto # 🎮 Juego Capacitivo NeoPixel — ESP32
- — versión 2.0.0 (ampliado a 8 columnas) · 2026
-  Prof. Matias Aldana
-  Colaboradores
-  Ing. Diego P. Poletti
-  Prof. Jonathan Garrido
+| Librería | Versión mínima | Instalación |
+|---|---|---|
+| Adafruit NeoPixel | 1.11 | Gestor de bibliotecas Arduino |
+| ESP32 Arduino Core | 2.0 | Gestor de placas Arduino |
+| WebServer.h | Incluida en el core | — |
+| SPIFFS.h | Incluida en el core | — |
 
+---
 
+## 📜 Historial de versiones
 
-# 🎮 Esquema Eléctrico — Juego Capacitivo NeoPixel ESP32
+| Versión | Fecha | Cambios principales |
+|---|---|---|
+| v1.0.0 | 2025 | Versión inicial — grilla 5×5 |
+| v2.1.0 | 17/04/2026 | Ampliado a 8 columnas, 20 LEDs por celda, servidor web |
+| **v3.0.0** | **2026** | **Distribución serpenteante por columna — sin cortes de tira. Nueva función `calcularIndiceLed()`. Nombres de variables y funciones en español. Comentarios didácticos en cada línea.** |
 
-## Índice
+---
+
+## 🔌 Esquema Eléctrico
+
+### Índice
+
 1. [Resumen del Sistema](#resumen)
 2. [Lista de Componentes](#componentes)
 3. [Bloque 1 — Alimentación Principal 5V](#alimentacion5v)
@@ -434,17 +484,18 @@ Proyecto # 🎮 Juego Capacitivo NeoPixel — ESP32
 
 ---
 
-## 1. Resumen del Sistema {#resumen}
+### 1. Resumen del Sistema {#resumen}
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────┐
-│                    SISTEMA JUEGO CAPACITIVO NEOPIXEL v2.0                       │
+│                    SISTEMA JUEGO CAPACITIVO NEOPIXEL v3.0                       │
 │                                                                                  │
 │  Tensión principal : 5 V DC / mínimo 15 A                                       │
 │  Tensión lógica ESP32 : 3.3 V (regulada)                                        │
 │  Grilla sensores  : 5 filas × 8 columnas = 40 celdas                            │
 │  LEDs totales     : 800 × WS2812B (20 LEDs/celda)                               │
 │  Corriente LEDs   : ≈ 14.4 A (brillo 30%)                                       │
+│  Distribución LED : Serpenteante por columna (sin cortes de tira)               │
 └─────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -455,7 +506,7 @@ Proyecto # 🎮 Juego Capacitivo NeoPixel — ESP32
 
 ---
 
-## 2. Lista de Componentes {#componentes}
+### 2. Lista de Componentes {#componentes}
 
 | # | Componente | Cantidad | Valor / Modelo | Función |
 |---|-----------|---------|---------------|---------|
@@ -482,35 +533,13 @@ Proyecto # 🎮 Juego Capacitivo NeoPixel — ESP32
 
 ---
 
-## 3. Bloque 1 — Alimentación Principal 5 V {#alimentacion5v}
+### 3. Bloque 1 — Alimentación Principal 5 V {#alimentacion5v}
 
-### 🟡 Explicación didáctica
+#### 🟡 Explicación didáctica
 
 La fuente de 5 V debe suministrar hasta **15 A** porque los 800 LEDs WS2812B, al brillo del 30%, consumen aproximadamente 14.4 A. Se agrega protección y filtrado para evitar que los transitorios de corriente de los LEDs afecten la lógica del ESP32.
 
 > 💡 **¿Qué es un transitorio de corriente?** Cuando muchos LEDs encienden al mismo tiempo, en un instante muy breve consumen mucha corriente de golpe. Esto puede hacer "caer" la tensión del bus y confundir al ESP32. Los capacitores actúan como una "reserva de energía" que entrega corriente en esos momentos críticos.
-
-```
-    FUENTE 5V / 15A
-    ┌──────────┐
-    │  +5V     ├──────────────────────────────────────────────────────── BARRA +5V
-    │          │          │                  │         │
-    │          │    D1 (1N5822)        C_bulk│         │
-    │          │    Schottky                  ┤├ 1000µF/10V    ← Absorbe picos de corriente
-    │          │    (protección                 │       ┤├ 100nF ceramic   de los LEDs
-    │          │     polaridad)                 │         │
-    │  GND     ├──────────────────────────────────────────────────────── BARRA GND
-    └──────────┘
-
-Notas:
-  • El diodo Schottky D1 protege contra inversión de polaridad.
-    Se elige Schottky (no silicio) para minimizar caída de tensión (≈0.3V vs 0.7V).
-  • C_bulk 1000µF filtra las variaciones lentas de tensión cuando los LEDs cambian de color.
-  • C_ceramic 100nF filtra el ruido de alta frecuencia (HF) de los WS2812B.
-  • IMPORTANTE: conectar el capacitor de 1000µF LO MÁS CERCA POSIBLE del primer LED.
-```
-
-### Esquema Alimentación 5V
 
 ```
  FUENTE 5V/15A
@@ -532,22 +561,15 @@ Notas:
 
 ---
 
-## 4. Bloque 2 — Regulador de 3.3 V {#regulador33v}
+### 4. Bloque 2 — Regulador de 3.3 V {#regulador33v}
 
-### 🟢 Explicación
+#### 🟢 Explicación
 
-El ESP32 opera internamente a **3.3 V**. Aunque el DevKit v1 incluye un regulador en placa, ese regulador está dimensionado para la corriente del ESP32 solamente. Si se conectan los **40 sensores TTP223** también a 3.3 V, la demanda de corriente puede superar la capacidad del regulador interno del DevKit.
-
-**Solución:** Agregar un regulador **AMS1117-3.3** externo (capacidad 1 A) con filtros adecuados que alimentará:
-- Los 40 sensores TTP223 (~1 mA c/u = 40 mA total)
-- El CD4051 (~1 mA)
-- Los resistores pull-down
-
-La salida lógica del TTP223 alimentado a 3.3 V será de **0 a 3.3 V**, perfectamente compatible con el ESP32.
+El ESP32 opera internamente a **3.3 V**. Si se conectan los **40 sensores TTP223** también a 3.3 V, la demanda de corriente puede superar la capacidad del regulador interno del DevKit. **Solución:** Agregar un regulador **AMS1117-3.3** externo con filtros adecuados.
 
 ```
   REGULADOR AMS1117-3.3
-  
+
        +5V_BUS
           │
           │   ┌─────────────────────┐
@@ -563,12 +585,6 @@ La salida lógica del TTP223 alimentado a 3.3 V será de **0 a 3.3 V**, perfecta
           │  │
          GND_BUS
 
-  Descripción de capacitores:
-  C3 (10µF/16V electrolítico) : Filtro de baja frecuencia en ENTRADA del regulador
-  C4 (100nF cerámico)         : Filtro de alta frecuencia en ENTRADA
-  C5 (10µF/10V electrolítico) : Filtro de baja frecuencia en SALIDA del regulador
-  C6 (100nF cerámico)         : Filtro de alta frecuencia en SALIDA
-  
   Corriente de salida AMS1117-3.3:
   ├── 40 × TTP223 @ ≈1mA c/u  = 40 mA
   ├── CD4051                   = 1  mA
@@ -576,16 +592,13 @@ La salida lógica del TTP223 alimentado a 3.3 V será de **0 a 3.3 V**, perfecta
   └── TOTAL                    ≈ 121 mA  ← muy por debajo del límite de 1A ✓
 ```
 
-> 💡 **¿Por qué 4 capacitores en el regulador?**
-> Los capacitores electrolíticos (10 µF) filtran variaciones lentas de tensión.
-> Los cerámicos (100 nF) filtran el ruido de radio frecuencia que podría
-> desestabilizar el regulador y afectar las lecturas del ESP32.
+> 💡 **¿Por qué 4 capacitores en el regulador?** Los capacitores electrolíticos (10 µF) filtran variaciones lentas de tensión. Los cerámicos (100 nF) filtran el ruido de radio frecuencia que podría desestabilizar el regulador y afectar las lecturas del ESP32.
 
 ---
 
-## 5. Bloque 3 — ESP32 DevKit v1 {#esp32}
+### 5. Bloque 3 — ESP32 DevKit v1 {#esp32}
 
-### 🔵 Pinout y Conexiones ESP32
+#### 🔵 Pinout y Conexiones ESP32
 
 ```
                         ╔══════════════════════════════════╗
@@ -610,29 +623,15 @@ GPIO10 (SD3)    ────────║ SD3  [17]           [20] GPIO8   ║
 GPIO11 (CMD)    ────────║ CMD  [18]           [19] GPIO7   ║
              +5V ──────►║ 5V   [19]           [18] GPIO6   ║
                         ╚══════════════════════════════════╝
-
-Alimentación del DevKit:
-  • Pin 5V  ──► recibe los 5V de la fuente (para el regulador interno del DevKit)
-  • Pin 3V3 ──► NO se usa como entrada; se usa como salida de referencia
-  • Pin GND ──► conectado a GND_BUS
-  
-  ALTERNATIVA RECOMENDADA: Alimentar el ESP32 por el pin VIN (5V) desde el bus
-  principal, y usar el regulador externo AMS1117 solo para sensores y CD4051.
 ```
 
 ---
 
-## 6. Bloque 4 — Multiplexor CD4051 {#mux}
+### 6. Bloque 4 — Multiplexor CD4051 {#mux}
 
-### 🟠 Explicación didáctica
+#### 🟠 Explicación didáctica
 
-El **CD4051** es un multiplexor/demultiplexor analógico de 8 canales. Funciona como un interruptor rotativo electrónico: con 3 señales de control (A, B, C) selecciona cuál de los 8 canales (Y0-Y7) se conecta al pin común (Z).
-
-En este diseño, cada canal Y0-Y7 se conecta a la línea de **habilitación/selección de columna** de los sensores TTP223. Cuando el ESP32 activa una columna mediante el CD4051, los 5 sensores de esa columna quedan "habilitados" y sus salidas llegan a los pines de fila del ESP32.
-
-> ⚠️ **Nivel lógico:** El CD4051 puede operar con VDD entre 3V y 15V.
-> **Se alimentará con 3.3V** (mismo nivel que el ESP32) para que las señales de control
-> A, B, C del ESP32 (0-3.3V) sean directamente compatibles sin riesgo.
+El **CD4051** es un multiplexor/demultiplexor analógico de 8 canales. Con 3 señales de control (A, B, C) selecciona cuál de los 8 canales (Y0-Y7) se conecta al pin común. Se alimenta a **3.3V** para compatibilidad directa con los pines del ESP32.
 
 ```
   CD4051BE — Pinout (DIP-16)
@@ -642,361 +641,207 @@ En este diseño, cada canal Y0-Y7 se conecta a la línea de **habilitación/sele
    Y6 ───────►│ 2           15  │◄─── A (GPIO4 via R=100Ω)
    Y2 ───────►│ 3           14  │◄─── B (GPIO5 via R=100Ω)
    Y7 ───────►│ 4           13  │◄─── C (GPIO18 via R=100Ω)
-   Y3 ───────►│ 5           12  │──── INH (Inhibit) → GND (activo bajo: siempre habilitado)
-   Y5 ───────►│ 6           11  │◄─── VEE → GND (para señales unipolares)
-   Y1 ───────►│ 7           10  │──── Z (salida común) → No se usa en este diseño*
+   Y3 ───────►│ 5           12  │──── INH → GND (siempre habilitado)
+   Y5 ───────►│ 6           11  │◄─── VEE → GND
+   Y1 ───────►│ 7           10  │──── Z (salida común — no usado)
    Y0 ───────►│ 8            9  │──── VSS (GND)
               └─────────────────┘
 
-  * En este diseño, los canales Y0-Y7 van a las líneas de enable de cada columna
-    de sensores TTP223. El pin Z no se utiliza porque el CD4051 actúa como
-    demultiplexor: distribuye la señal de VDD a una columna a la vez.
+  Desacople VCC:
+      VDD (+3.3V) ─── ╔╧╗ C7: 100nF (junto al pin VDD del IC)
+                       ╚╤╝
+                       GND
 
-  Desacople:
-              VDD (+3.3V)
-                  │
-                 ╔╧╗ C7: 100nF cerámico (LO MÁS CERCA POSIBLE del pin VDD del IC)
-                 ╚╤╝
-                 GND
-
-
-  TABLA DE SELECCIÓN DE CANALES:
-  ┌───┬───┬───┬──────────────┐
-  │ C │ B │ A │ Canal activo │
-  ├───┼───┼───┼──────────────┤
-  │ 0 │ 0 │ 0 │ Y0 — Col. 0  │
-  │ 0 │ 0 │ 1 │ Y1 — Col. 1  │
-  │ 0 │ 1 │ 0 │ Y2 — Col. 2  │
-  │ 0 │ 1 │ 1 │ Y3 — Col. 3  │
-  │ 1 │ 0 │ 0 │ Y4 — Col. 4  │
-  │ 1 │ 0 │ 1 │ Y5 — Col. 5  │
-  │ 1 │ 1 │ 0 │ Y6 — Col. 6  │
-  │ 1 │ 1 │ 1 │ Y7 — Col. 7  │
-  └───┴───┴───┴──────────────┘
-```
-
-### Conexión de líneas de control con resistores anti-ruido
-
-```
+  Líneas de control con resistores anti-ruido:
   GPIO4  (ESP32) ──[R_A: 100Ω]──► Pin 15 (A) del CD4051
   GPIO5  (ESP32) ──[R_B: 100Ω]──► Pin 14 (B) del CD4051
   GPIO18 (ESP32) ──[R_C: 100Ω]──► Pin 13 (C) del CD4051
-
-  ¿Por qué 100Ω en serie?
-  Estos resistores forman un filtro RC con la capacidad parásita del cableado.
-  Reducen la velocidad de los flancos de las señales de control, lo que:
-  1. Elimina oscilaciones (ringing) en líneas largas
-  2. Reduce la radiación electromagnética (EMI)
-  3. Protege los pines del ESP32 de picos de corriente
 ```
 
 ---
 
-## 7. Bloque 5 — Sensores TTP223 (Matriz 5×8) {#sensores}
+### 7. Bloque 5 — Sensores TTP223 (Matriz 5×8) {#sensores}
 
-### 🟣 Explicación didáctica
+#### 🟣 Explicación didáctica
 
-El **TTP223** es un sensor capacitivo de un solo toque. Tiene 3 terminales:
-- **VCC**: alimentación (aquí 3.3 V para compatibilidad con ESP32)
-- **GND**: masa
-- **SIG**: salida digital (HIGH al tocar, LOW en reposo)
-
-La organización en **matriz** funciona así:
-- Las **8 columnas** son controladas por el CD4051 (solo una activa a la vez)
-- Las **5 filas** van directamente a pines GPIO del ESP32
-- En cada momento, el ESP32 selecciona una columna vía CD4051 y lee las 5 filas
-
-> 💡 **Compatibilidad de niveles:** Al alimentar los TTP223 con **3.3 V**, su
-> salida SIG oscila entre 0 V y 3.3 V → directamente compatible con ESP32.
-> Si se alimentaran con 5 V, la salida podría llegar a 5 V y **dañar el ESP32**.
-
-### Conexión de UN sensor TTP223 (esquema unitario)
+El **TTP223** es un sensor capacitivo de un solo toque con 3 terminales: **VCC** (3.3 V), **GND** y **SIG** (salida HIGH al tocar). La organización en matriz permite leer 40 sensores con solo 8 pines de fila + CD4051.
 
 ```
-  SENSOR TTP223 (un sensor individual)
-  
-  +3.3V_BUS ──────────────────────── VCC (pin 1 del TTP223)
-                                      │
-                                     ╔╧╗ C_bypass: 100nF cerámico
-                                     ╚╤╝ (junto a cada sensor para filtrar ruido)
-                                      │
-  GND_BUS ────────────────────────── GND (pin 2 del TTP223)
-                                      
+  Conexión unitaria de un sensor TTP223:
+
+  +3.3V_BUS ─────────────────── VCC (pin 1 del TTP223)
+                                  │
+                                 ╔╧╗ C_bypass: 100nF (junto a cada sensor)
+                                 ╚╤╝
+  GND_BUS ──────────────────── GND (pin 2 del TTP223)
+
   Salida SIG (pin 3) ──[R_serie: 100Ω]──► Pin de FILA del ESP32
-  
-  El R_serie de 100Ω protege el pin GPIO del ESP32 en caso de
-  un transitorio de tensión o cortocircuito accidental.
-```
 
-### Diagrama de la Matriz Completa 5×8
 
-```
-                    COL0   COL1   COL2   COL3   COL4   COL5   COL6   COL7
-                     Y0     Y1     Y2     Y3     Y4     Y5     Y6     Y7
-                   (CD4051 selecciona UNA columna a la vez)
-                      │      │      │      │      │      │      │      │
-  FILA 0 (GPIO34) ──[S00]──[S01]──[S02]──[S03]──[S04]──[S05]──[S06]──[S07]
-                      │      │      │      │      │      │      │      │
-  FILA 1 (GPIO35) ──[S10]──[S11]──[S12]──[S13]──[S14]──[S15]──[S16]──[S17]
-                      │      │      │      │      │      │      │      │
-  FILA 2 (GPIO32) ──[S20]──[S21]──[S22]──[S23]──[S24]──[S25]──[S26]──[S27]
-                      │      │      │      │      │      │      │      │
-  FILA 3 (GPIO33) ──[S30]──[S31]──[S32]──[S33]──[S34]──[S35]──[S36]──[S37]
-                      │      │      │      │      │      │      │      │
-  FILA 4 (GPIO25) ──[S40]──[S41]──[S42]──[S43]──[S44]──[S45]──[S46]──[S47]
+  Diagrama de la Matriz Completa 5×8:
 
-  Cada [Sxx] representa un sensor TTP223.
-  Cada sensor TTP223 tiene su capacitor de bypass de 100nF entre VCC y GND.
-```
+                  COL0   COL1   COL2   COL3   COL4   COL5   COL6   COL7
+                   Y0     Y1     Y2     Y3     Y4     Y5     Y6     Y7
+                    │      │      │      │      │      │      │      │
+  FILA 0 (GPIO34) [S00]─[S01]─[S02]─[S03]─[S04]─[S05]─[S06]─[S07]
+  FILA 1 (GPIO35) [S10]─[S11]─[S12]─[S13]─[S14]─[S15]─[S16]─[S17]
+  FILA 2 (GPIO32) [S20]─[S21]─[S22]─[S23]─[S24]─[S25]─[S26]─[S27]
+  FILA 3 (GPIO33) [S30]─[S31]─[S32]─[S33]─[S34]─[S35]─[S36]─[S37]
+  FILA 4 (GPIO25) [S40]─[S41]─[S42]─[S43]─[S44]─[S45]─[S46]─[S47]
 
-### Conexión de Pull-Down para GPIO34 y GPIO35
 
-```
-  ⚠️  GPIO34 y GPIO35 son SOLO ENTRADA y NO tienen resistencia pull-down interna.
-      Se REQUIEREN resistencias externas obligatoriamente.
+  Pull-down obligatorio para GPIO34 y GPIO35:
 
-  GPIO34 (Fila 0):
-  
-  Pin GPIO34 (ESP32) ──┬──[R_pd0: 10kΩ]── GND_BUS
-                       │
-                       └── (señales de los sensores Fila 0 via R 100Ω)
+  GPIO34 ──┬──[R_pd0: 10kΩ]── GND_BUS
+           └── (señales SIG Fila 0 via R 100Ω)
 
-  GPIO35 (Fila 1):
-  
-  Pin GPIO35 (ESP32) ──┬──[R_pd1: 10kΩ]── GND_BUS
-                       │
-                       └── (señales de los sensores Fila 1 via R 100Ω)
-
-  GPIO32, GPIO33, GPIO25 (Filas 2, 3, 4):
-  Usan INPUT_PULLDOWN interno del ESP32 → NO necesitan resistor externo.
-  Aun así, se mantiene el R_serie de 100Ω en la línea de señal.
+  GPIO35 ──┬──[R_pd1: 10kΩ]── GND_BUS
+           └── (señales SIG Fila 1 via R 100Ω)
 ```
 
 ---
 
-## 8. Bloque 6 — Tiras NeoPixel WS2812B {#neopixel}
+### 8. Bloque 6 — Tiras NeoPixel WS2812B {#neopixel}
 
-### 🔴 Explicación didáctica
+#### 🔴 Explicación didáctica
 
-Los **WS2812B** son LEDs RGB con controlador integrado. Se encadenan en serie: el pin **DOUT** del LED anterior se conecta al **DIN** del siguiente. Solo se necesita **un pin de datos** del ESP32 para controlar los 800 LEDs.
-
-**Tensión:** Los WS2812B operan a **5 V** (tanto para alimentación como para el nivel lógico de datos). Sin embargo, muchos módulos WS2812B aceptan señales de datos de 3.3 V cuando se alimentan a 5 V porque el umbral lógico HIGH es de ~0.7 × VCC = 3.5 V. Esto está en el límite.
-
-**Solución robusta:** El resistor de **470 Ω** en la línea de datos ya está contemplado en el código. Para garantizar compatibilidad, se puede añadir un **buffer 74AHCT125** si se presentan problemas de comunicación, aunque en la mayoría de instalaciones con cable corto, la conexión directa con 470 Ω funciona correctamente.
-
-### Esquema de Alimentación NeoPixel
+Los **WS2812B** son LEDs RGB con controlador integrado. Se encadenan en serie usando un solo pin de datos del ESP32. En la **distribución serpenteante v3.0**, la tira sigue el recorrido zigzag por columnas sin necesidad de cortes.
 
 ```
-  ALIMENTACIÓN TIRAS WS2812B
+  Línea de datos NeoPixel:
 
-  +5V_BUS ──────────────────────────────────────────────────────────────► +5V LEDs
-              │
-             ╔╧╗ C8: 1000µF/10V electrolítico  ← ¡MUY IMPORTANTE!
-             ║ ║ (junto al conector de las tiras, a menos de 5 cm)
-             ╚╤╝
-                │
-			   ╔╧╗ C9: 100nF cerámico
-               ╚╤╝
-                │
-  GND_BUS ───┴─────────────────────────────────────────────────────────── GND LEDs
-
-  ¿Por qué el capacitor de 1000µF tan grande?
-  Al arrancar los LEDs o cambiar de color, la corriente puede variar
-  bruscamente varios amperios en microsegundos. Sin este capacitor,
-  la tensión del bus caería y podría resetear el ESP32 o corromper datos.
-```
-
-### Línea de Datos NeoPixel
-
-```
   GPIO26 (ESP32) ──[R1: 470Ω]──────────────────────► DIN (primer LED WS2812B)
-                                 │
-                                 └── (el resistor va LO MÁS CERCA POSIBLE
-                                      del pin GPIO26, NO del LED)
 
-  Encadenamiento de las 40 tiras (cada tira = 20 LEDs):
-  
-  [Tira Celda 0,0]──DOUT──►DIN──[Tira Celda 0,1]──DOUT──►DIN──[Tira Celda 0,2]
-  ──► ... ──►[Tira Celda 0,7]──DOUT──►DIN──[Tira Celda 1,0]──► ...
-  ──► ... ──►[Tira Celda 4,7]   (último LED de la cadena = LED #799)
+  Encadenamiento serpenteante (v3.0):
 
-  Alimentación de las tiras (IMPORTANTE — conexión en paralelo):
-  
-  +5V_BUS ──┬──► VCC Tira [0,0]
-            ├──► VCC Tira [0,1]
-            ├──► VCC Tira [0,2]
-            │    ... (todas en paralelo)
-            └──► VCC Tira [4,7]
+  [Celda 0,0]─DOUT─►DIN─[Celda 1,0]─DOUT─►DIN─[Celda 2,0]─►..─[Celda 4,0]
+     (Col0↓ baja completa)
+        └─►DIN─[Celda 4,1]─DOUT─►DIN─[Celda 3,1]─►..─[Celda 0,1]
+              (Col1↑ sube completa)
+                 └─►DIN─[Celda 0,2]─►..─[Celda 4,2]
+                      (Col2↓ baja completa)
+                          ... y así hasta la columna 7
 
-  GND_BUS ──┬──► GND Tira [0,0]
-            ├──► GND Tira [0,1]
-            │    ...
-            └──► GND Tira [4,7]
+
+  Alimentación (TODAS las tiras en paralelo desde el bus):
+
+  +5V_BUS ──┬──► VCC Tira Celda[0][0]
+  [C8:1000µF] ├──► VCC Tira Celda[1][0]
+  [C9:100nF]  │    ...
+              └──► VCC Tira Celda[4][7]
+
+  GND_BUS ──┬──► GND Tira Celda[0][0]
+             │    ...
+             └──► GND Tira Celda[4][7]
 
   ⚠️ NUNCA conectar las tiras en serie para la alimentación.
-     Cada tira necesita alimentación directa desde el bus para
-     evitar caída de tensión acumulativa que afecte el color de los LEDs.
+  ⚠️ Alimentar cada grupo de ≤80 LEDs con punto de inyección propio.
 ```
+
+> 💡 **Ventaja del recorrido serpenteante:** Los puntos de doblez de la tira (al cambiar de columna) quedan físicamente accesibles para inyectar corriente al bus 5V, sin necesidad de tender cables largos desde una fuente central.
 
 ---
 
-## 9. Bloque 7 — Pulsadores {#pulsadores}
+### 9. Bloque 7 — Pulsadores {#pulsadores}
 
-### ⚪ Explicación didáctica
+#### ⚪ Explicación didáctica
 
-Los pulsadores son interruptores mecánicos normalmente abiertos (NA). Cuando se presionan, conectan el pin del ESP32 a +3.3 V (señal HIGH). En reposo, la resistencia de **pull-down de 10 kΩ** mantiene el pin en GND (señal LOW), evitando lecturas indeterminadas o falsas activaciones por ruido.
-
-El software ya implementa **debounce** (filtro de rebotes) de 50 ms.
+Pulsadores normalmente abiertos (NA) con pull-down de 10 kΩ. En reposo el pin lee LOW; al presionar, lee HIGH. El firmware aplica debounce de 50 ms por software.
 
 ```
   BOTÓN INICIO (GPIO27)
 
-  +3.3V_BUS ──────────────────────── Terminales del pulsador
-                                          │
-                                    [PULSADOR SW1]
-                                          │
-  GPIO27 (ESP32) ─────────────────────── ┤
-                                          │
-  GND_BUS ──────[R_pulldown: 10kΩ]────── ┘
+  +3.3V_BUS ─── [PULSADOR SW1] ──► GPIO27 (ESP32)
+                                        │
+  GND_BUS ──────[R_pulldown: 10kΩ]──── ┘
 
-  Cuando SW1 está suelto  : GPIO27 = GND (LOW)  → No presionado
-  Cuando SW1 se presiona  : GPIO27 = +3.3V (HIGH) → ¡Presionado!
+  BOTÓN RESET (GPIO15) — Idéntico:
 
-
-  BOTÓN RESET (GPIO15) — Idéntico al anterior:
-
-  +3.3V_BUS ──────────────────────── Terminales del pulsador
-                                          │
-                                    [PULSADOR SW2]
-                                          │
-  GPIO15 (ESP32) ───────────────────────  ┤
-                                          │
-  GND_BUS ──────[R_pulldown: 10kΩ]──────  ┘
+  +3.3V_BUS ─── [PULSADOR SW2] ──► GPIO15 (ESP32)
+                                        │
+  GND_BUS ──────[R_pulldown: 10kΩ]──── ┘
 ```
 
 ---
 
-## 10. Diagrama de Conexiones Completo {#diagrama}
+### 10. Diagrama de Conexiones Completo {#diagrama}
 
 ```
 ╔══════════════════════════════════════════════════════════════════════════════════════╗
-║                    DIAGRAMA COMPLETO DEL SISTEMA                                    ║
-║                    JuegoCapacitivoNeoPixel v2.0                                     ║
+║              DIAGRAMA COMPLETO DEL SISTEMA — JuegoCapacitivoNeoPixel v3.0          ║
 ╚══════════════════════════════════════════════════════════════════════════════════════╝
 
 ┌─────────────────────────────────────────────────────────────────────────────────────┐
 │ BLOQUE ALIMENTACIÓN                                                                 │
-│                                                                                     │
-│  [FUENTE 5V/15A]──(+)──[D1:1N5822]──┬──────────────────────────────── +5V_BUS       │
+│  [FUENTE 5V/15A]──(+)──[D1:1N5822]──┬──────────────────────────────── +5V_BUS     │
 │                                     │                                               │
-│                            C1:1000µF][C2:100nF]                                     │
+│                            [C1:1000µF][C2:100nF]                                   │
 │                                     │                                               │
-│  [FUENTE 5V/15A]──(-)──────────────┴──────────────────────────────── GND_BUS        │
+│  [FUENTE 5V/15A]──(-)──────────────┴──────────────────────────────── GND_BUS      │
 │                                                                                     │
-│  +5V_BUS──[AMS1117-3.3]──┬──────────────────────────────────────── +3.3V_BUS        │
-│  +5V_BUS──[C3:10µF]──GND │ [C5:10µF][C6:100nF]──GND                                 │
-│  +5V_BUS──[C4:100nF]─GND │                                                          │
-│                           │                                                         │
+│  +5V_BUS──[AMS1117-3.3]──┬──────────────────────────────────────── +3.3V_BUS      │
+│  [C3:10µF][C4:100nF]──GND │ [C5:10µF][C6:100nF]──GND                              │
 └───────────────────────────┼─────────────────────────────────────────────────────────┘
                             │
 ┌───────────────────────────┼─────────────────────────────────────────────────────────┐
 │ ESP32 DevKit v1           │                                                         │
 │                      +3.3V_BUS ──► pin 3V3                                         │
-│                      +5V_BUS  ──► pin 5V  (alimenta regulador interno del DevKit)  │
-│                      GND_BUS  ──► pin GND                                           │
+│                      +5V_BUS  ──► pin 5V                                           │
+│                      GND_BUS  ──► pin GND                                          │
 │                                                                                     │
 │  pin GPIO4  ──[100Ω]──────────────────────────────► CD4051 pin 15 (A)             │
 │  pin GPIO5  ──[100Ω]──────────────────────────────► CD4051 pin 14 (B)             │
 │  pin GPIO18 ──[100Ω]──────────────────────────────► CD4051 pin 13 (C)             │
 │                                                                                     │
 │  pin GPIO34 ──┬──[10kΩ]──GND                                                      │
-│               └──[100Ω]──► BUS_FILA_0 (salidas SIG col. 0 de todos los TTP223 F0) │
-│                                                                                     │
+│               └──[100Ω]──► BUS_FILA_0                                              │
 │  pin GPIO35 ──┬──[10kΩ]──GND                                                      │
 │               └──[100Ω]──► BUS_FILA_1                                              │
-│                                                                                     │
-│  pin GPIO32 ──[100Ω]──────────────────────────────► BUS_FILA_2 (pull-down interno)│
-│  pin GPIO33 ──[100Ω]──────────────────────────────► BUS_FILA_3 (pull-down interno)│
-│  pin GPIO25 ──[100Ω]──────────────────────────────► BUS_FILA_4 (pull-down interno)│
+│  pin GPIO32 ──[100Ω]──► BUS_FILA_2 (pull-down interno)                            │
+│  pin GPIO33 ──[100Ω]──► BUS_FILA_3 (pull-down interno)                            │
+│  pin GPIO25 ──[100Ω]──► BUS_FILA_4 (pull-down interno)                            │
 │                                                                                     │
 │  pin GPIO26 ──[470Ω]──────────────────────────────► DIN primer WS2812B            │
 │                                                                                     │
-│  pin GPIO27 ──────────────────────────────────────► BTN_INICIO ──[10kΩ]──GND      │
-│  pin GPIO15 ──────────────────────────────────────► BTN_RESET  ──[10kΩ]──GND      │
-│                                                                                     │
+│  pin GPIO27 ──────────────────────────────────────► BTN_INICIO ──[10kΩ]──GND     │
+│  pin GPIO15 ──────────────────────────────────────► BTN_RESET  ──[10kΩ]──GND     │
 └─────────────────────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────────────────────┐
 │ CD4051 MULTIPLEXOR                                                                  │
-│                                                                                     │
 │  +3.3V_BUS ──[C7:100nF]──► VDD (pin 16)                                           │
-│  GND_BUS   ──────────────► VSS (pin 9) y VEE (pin 11)                             │
-│  GND_BUS   ──────────────► INH (pin 12) — siempre habilitado                      │
-│                                                                                     │
-│  Canales Y0 a Y7 (pines 13,14,15,12,1,5,2,4 según tabla CD4051)                   │
-│  Cada canal Yx va al pin ENABLE de la columna x de sensores TTP223                 │
-│                                                                                     │
-│  Y0 (pin 13) ──► Enable Columna 0 (5 sensores TTP223: F0C0, F1C0 ... F4C0)       │
-│  Y1 (pin 14) ──► Enable Columna 1                                                  │
-│  Y2 (pin 15) ──► Enable Columna 2                                                  │
-│  Y3 (pin 12) ──► Enable Columna 3                                                  │
-│  Y4 (pin  1) ──► Enable Columna 4                                                  │
-│  Y5 (pin  5) ──► Enable Columna 5                                                  │
-│  Y6 (pin  2) ──► Enable Columna 6                                                  │
-│  Y7 (pin  4) ──► Enable Columna 7                                                  │
-│                                                                                     │
+│  GND_BUS ──────────────► VSS (pin 9), VEE (pin 11), INH (pin 12)                  │
+│  Y0 ──► Enable Columna 0   Y1 ──► Enable Columna 1                                │
+│  Y2 ──► Enable Columna 2   Y3 ──► Enable Columna 3                                │
+│  Y4 ──► Enable Columna 4   Y5 ──► Enable Columna 5                                │
+│  Y6 ──► Enable Columna 6   Y7 ──► Enable Columna 7                                │
 └─────────────────────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────────────────────┐
-│ MATRIZ SENSORES TTP223 (5×8 = 40 unidades)                                         │
+│ TIRAS LED WS2812B — distribución serpenteante v3.0 (40 tiras × 20 LEDs)           │
 │                                                                                     │
-│  Cada sensor TTP223:                                                                │
-│    VCC  ──► +3.3V_BUS  (con C_bypass 100nF entre VCC y GND de cada sensor)        │
-│    GND  ──► GND_BUS                                                                 │
-│    SIG  ──► BUS_FILA_x correspondiente                                              │
+│  Alimentación (TODAS en paralelo):                                                  │
+│  +5V_BUS ──[C8:1000µF][C9:100nF]──► VCC todas las tiras                           │
+│  GND_BUS ──────────────────────────► GND todas las tiras                           │
 │                                                                                     │
-│  Nota: El pin "enable" del TTP223 (si existe en el módulo) puede conectarse        │
-│  directamente al canal Yx del CD4051 para activación selectiva por columna.         │
-│  Si el módulo TTP223 no tiene pin ENABLE, todos los sensores de una fila            │
-│  conectan su SIG al bus de fila, y el CD4051 no se usa para habilitación           │
-│  sino que el firmware simplemente ignora las lecturas de las columnas no activas.   │
-│                                                                                     │
+│  Datos (encadenado serpenteante por columna):                                      │
+│  GPIO26─[470Ω]─►DIN[0,0]─►[1,0]─►[2,0]─►[3,0]─►[4,0]  ← Col 0 baja            │
+│                                               └─►DIN[4,1]─►[3,1]─►[2,1]─►[1,1]─►[0,1]  ← Col 1 sube │
+│                                                                 └─►DIN[0,2]─►...  ← Col 2 baja │
 └─────────────────────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────────────────────┐
-│ TIRAS LED WS2812B (40 tiras × 20 LEDs = 800 LEDs totales)                          │
-│                                                                                     │
-│  Alimentación (TODAS en paralelo desde el bus):                                    │
-│  +5V_BUS ──┬──► VCC Tira Celda[0][0]                                               │
-│  [C8:1000µF/10V] │──► VCC Tira Celda[0][1]  ← capacitor JUNTO al primer LED      │
-│  [C9:100nF]      │    ...                                                           │
-│             └──► VCC Tira Celda[4][7]                                               │
-│                                                                                     │
-│  GND_BUS ──┬──► GND Tira Celda[0][0]                                               │
-│             ├──► GND Tira Celda[0][1]                                               │
-│             │    ...                                                                 │
-│             └──► GND Tira Celda[4][7]                                               │
-│                                                                                     │
-│  Datos (encadenados en serie):                                                      │
-│  GPIO26──[470Ω]──► DIN[0][0]──DOUT──► DIN[0][1]──DOUT──►...──► DOUT[4][7]        │
-│                                                                                     │
-└─────────────────────────────────────────────────────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────────────────────────────────────────┐
-│ PULSADORES                                                                           │
-│                                                                                     │
+│ PULSADORES                                                                          │
 │  +3.3V_BUS ──[SW1: BTN INICIO]──┬──► GPIO27 (ESP32)                               │
 │                                   └──[10kΩ]──► GND_BUS                             │
-│                                                                                     │
 │  +3.3V_BUS ──[SW2: BTN RESET] ──┬──► GPIO15 (ESP32)                               │
 │                                   └──[10kΩ]──► GND_BUS                             │
-│                                                                                     │
 └─────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 11. Tabla Resumen de Pines {#tabla}
+### 11. Tabla Resumen de Pines {#tabla}
 
 ```
 ╔══════════════════════╦══════════╦═══════════╦════════════════════════════════════════╗
@@ -1037,11 +882,11 @@ El software ya implementa **debounce** (filtro de rebotes) de 50 ms.
 
 ---
 
-## 12. Notas de Diseño Robusto frente al Ruido Eléctrico {#notas}
+### 12. Notas de Diseño Robusto frente al Ruido Eléctrico {#notas}
 
-### ⚡ Estrategias Anti-Ruido implementadas
+#### ⚡ Estrategias Anti-Ruido implementadas
 
-#### 12.1 Separación de planos de masa
+##### 12.1 Separación de planos de masa
 
 ```
   CONCEPTO: "Estrella de tierra" o separación funcional
@@ -1055,15 +900,9 @@ El software ya implementa **debounce** (filtro de rebotes) de 50 ms.
       │       └── Unir al GND_BUS en UN solo punto, cerca del regulador 3.3V
       │
       └── Punto de unión único: en los terminales de la fuente de alimentación
-
-  ¿Por qué?
-  Las corrientes de los LEDs crean caídas de tensión en los conductores.
-  Si el GND de los LEDs y del ESP32 comparten el mismo conductor largo,
-  esas caídas de tensión "contaminan" la referencia de masa del ESP32,
-  causando lecturas erráticas en los sensores.
 ```
 
-#### 12.2 Capacitores de desacople — Resumen
+##### 12.2 Capacitores de desacople — Resumen
 
 | Ubicación | Capacitor | Valor | Propósito |
 |-----------|-----------|-------|-----------|
@@ -1076,13 +915,12 @@ El software ya implementa **debounce** (filtro de rebotes) de 50 ms.
 | Primer LED WS2812B | C9 | 100 nF cerámico | Filtro HF línea LEDs |
 | Cada sensor TTP223 | C_bypass × 40 | 100 nF cerámico | Desacople individual |
 
-#### 12.3 Resistores de protección y filtrado
+##### 12.3 Resistores de protección y filtrado
 
 ```
   R = 470Ω en datos NeoPixel:
   ├── Limita la corriente en caso de cortocircuito transitorio
-  ├── Junto con la capacidad parásita del cable, forma un filtro
-  │   que suaviza los flancos → reduce EMI irradiada
+  ├── Junto con la capacidad parásita del cable, forma un filtro RC
   └── Protege el GPIO26 del ESP32
 
   R = 100Ω en control MUX (GPIO4, GPIO5, GPIO18):
@@ -1092,17 +930,15 @@ El software ya implementa **debounce** (filtro de rebotes) de 50 ms.
 
   R = 100Ω en líneas de fila (GPIO34, GPIO35, GPIO32, GPIO33, GPIO25):
   ├── Forma filtro RC con capacidad de entrada del GPIO
-  ├── Protege el pin de entrada ante descargas electrostáticas (ESD)
+  ├── Protege el pin ante descargas electrostáticas (ESD)
   └── Atenúa ruido de alta frecuencia proveniente de los sensores
 
   R = 10kΩ pull-down en GPIO34, GPIO35, GPIO27, GPIO15:
   ├── Mantiene el pin en estado definido (LOW) cuando no hay señal
-  ├── Previene lecturas erráticas por ruido ambiental
-  └── Valor de 10kΩ: suficientemente alto para no consumir corriente
-      innecesaria, suficientemente bajo para "vencer" el ruido capacitivo
+  └── Previene lecturas erráticas por ruido ambiental
 ```
 
-#### 12.4 Buenas prácticas de PCB / cableado
+##### 12.4 Buenas prácticas de PCB / cableado
 
 ```
   1. LONGITUD de cables de datos (NeoPixel):
@@ -1115,10 +951,10 @@ El software ya implementa **debounce** (filtro de rebotes) de 50 ms.
 
   3. RUTAS de alimentación de LEDs:
      → Usar cable de sección ≥ 2.5 mm² (AWG13) para 15A
-     → Alimentar las tiras desde ambos extremos si son largas (reduce caída)
+     → Alimentar las tiras en los puntos de doblez (serpenteante)
 
   4. SEPARAR físicamente:
-     → Cableado de datos (sensores, MUX, NeoPixel) alejado de cableado de potencia
+     → Cableado de datos alejado de cableado de potencia
      → Cruzar cables en 90° si deben cruzarse obligatoriamente
 
   5. TIERRA COMÚN única:
@@ -1140,6 +976,8 @@ El software ya implementa **debounce** (filtro de rebotes) de 50 ms.
   □ Verificar pull-down 10kΩ en GPIO34 y GPIO35
   □ Verificar pull-down 10kΩ en GPIO27 (BTN_INICIO) y GPIO15 (BTN_RESET)
   □ Confirmar que el pin INH del CD4051 está conectado a GND (no flotante)
+  □ Verificar el recorrido físico de la tira: Col0↓ → Col1↑ → Col2↓ → ...
+  □ Confirmar que los dobleces de la tira coinciden con fin de cada columna
   □ Medir corriente en reposo antes de conectar todos los LEDs
   □ La fuente debe ser de 5V / mínimo 15A con protección de sobrecorriente
 ```
@@ -1153,3 +991,28 @@ El software ya implementa **debounce** (filtro de rebotes) de 50 ms.
 > microcontrolador ESP32 con WiFi activo. Cada resistor, capacitor y
 > decisión de diseño tiene una razón específica documentada para facilitar
 > el aprendizaje y la reproducibilidad del proyecto.
+>
+> La distribución serpenteante (v3.0) además simplifica el montaje físico:
+> una sola tira continua recorre toda la grilla sin cortes, lo que reduce
+> puntos de falla mecánica y facilita la inyección de corriente en los
+> puntos de doblez naturales de la tira.
+
+---
+
+## 📜 Licencia
+
+Este proyecto se distribuye bajo la licencia **MIT**. Podés usarlo, modificarlo y distribuirlo libremente con atribución a los autores originales.
+
+```
+MIT License — Copyright (c) 2026
+```
+
+---
+
+## 👤 Autores
+
+**Juego Capacitivo NeoPixel — ESP32** · versión 3.0.0 · 2026
+
+- **Prof. Matías Aldana**
+- **Ing. Diego P. Poletti**
+- **Prof. Jonathan Garrido**
