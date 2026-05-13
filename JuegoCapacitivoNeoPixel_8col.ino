@@ -1,8 +1,10 @@
 /**
- * @file JuegoCapacitivoNeoPixel_8col.ino
+ * @file JuegoCapacitivoNeoPixelino
  *
  * @brief Juego interactivo con sensores capacitivos y tiras de LEDs de colores
  *        (NeoPixel WS2812B) controlado por un ESP32.
+ *        Esta versión implementa una distribución SERPENTEANTE de la tira LED,
+ *        lo que elimina la necesidad de cortar el cable entre columnas.
  *
  * ---------------------------------------------------------------------------
  * ¿QUÉ HACE ESTE PROGRAMA?
@@ -14,6 +16,39 @@
  *  El jugador tiene que pisar la celda verde sin que la barra roja
  *  esté pasando por ahí. Si lo logra, suma un punto. Con 10 puntos, gana.
  *  Si la barra roja lo pilla pisando, pierde.
+ *
+ * ---------------------------------------------------------------------------
+ * DISTRIBUCIÓN SERPENTEANTE DE LA TIRA LED
+ * ---------------------------------------------------------------------------
+ *  La tira recorre la grilla en zigzag COLUMNA POR COLUMNA (de arriba
+ *  hacia abajo en las columnas pares, de abajo hacia arriba en las impares),
+ *  así la tira nunca necesita ser cortada para pasar de fila 4 → fila 0:
+ *
+ *   Col 0 (↓)   Col 1 (↑)   Col 2 (↓)   Col 3 (↑)  ...  Col 7 (↑)
+ *   [0][0]       [4][1]       [0][2]       [4][3]          [4][7]
+ *   [1][0]       [3][1]       [1][2]       [3][3]          [3][7]
+ *   [2][0]       [2][1]       [2][2]       [2][3]          [2][7]
+ *   [3][0]       [1][1]       [3][2]       [1][3]          [1][7]
+ *   [4][0]       [0][1]       [4][2]       [0][3]          [0][7]
+ *
+ *  Índices de celdas en la cadena (orden físico de la tira):
+ *
+ *    Celda física  0 → [fila 0][col 0] → LEDs   0 –  19
+ *    Celda física  1 → [fila 1][col 0] → LEDs  20 –  39
+ *    Celda física  2 → [fila 2][col 0] → LEDs  40 –  59
+ *    Celda física  3 → [fila 3][col 0] → LEDs  60 –  79
+ *    Celda física  4 → [fila 4][col 0] → LEDs  80 –  99
+ *    Celda física  5 → [fila 4][col 1] → LEDs 100 – 119   ← sube
+ *    Celda física  6 → [fila 3][col 1] → LEDs 120 – 139
+ *    Celda física  7 → [fila 2][col 1] → LEDs 140 – 159
+ *    Celda física  8 → [fila 1][col 1] → LEDs 160 – 179
+ *    Celda física  9 → [fila 0][col 1] → LEDs 180 – 199
+ *    Celda física 10 → [fila 0][col 2] → LEDs 200 – 219   ← baja de nuevo
+ *    ...
+ *    Celda física 39 → [fila 4][col 7] → LEDs 780 – 799
+ *
+ *  BARRA DE PROGRESO: usa los LEDs 0–9 de la celda [0][0]
+ *  (misma posición física que en la versión anterior).
  *
  * ---------------------------------------------------------------------------
  * HARDWARE NECESARIO
@@ -43,8 +78,8 @@
  *  Esto reserva 1.5 MB para SPIFFS, donde se guarda el historial de partidas.
  *
  * @author  Matías Aldana - Diego Poletti - Jonathan Garrido
- * @version 2.1.0  (ampliado a 8 columnas, 20 LEDs por celda)
- * @date    17/04/2026
+ * @version 3.0.0  (distribución serpenteante por columna, sin cortes de tira)
+ * @date    2026-04-17
  * @license MIT
  */
 
@@ -124,7 +159,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 //  SECCIÓN 3 — DIMENSIONES DE LA GRILLA
 //  Acá definimos el tamaño de la grilla de sensores.
-//  Ahora usamos las 8 columnas del multiplexor para aprovechar al máximo.
+//  Usamos las 8 columnas del multiplexor para aprovechar al máximo.
 // ═══════════════════════════════════════════════════════════════════════════
 
 #define FILAS          5               // Cantidad de filas de sensores
@@ -268,28 +303,29 @@ const uint32_t coloresProgreso[PUNTOS_PARA_GANAR] = {
 //  el orden en que aparecen en el archivo.
 // ═══════════════════════════════════════════════════════════════════════════
 
-void seleccionarColumna(int columna);       // Activa una columna en el multiplexor
-void escanearSensores();                    // Lee todos los sensores de la columna activa
-void avanzarBarraRoja();                    // Mueve la barra roja un paso
-void verificarAccionesJugador();            // Evalúa si el jugador pisó algo
-void colocarCeldasVerdes();                 // Pone 1 o 2 celdas objetivo verdes al azar
-void dibujarLeds();                         // Actualiza los colores de todos los LEDs
+void seleccionarColumna(int columna);          // Activa una columna en el multiplexor
+void escanearSensores();                       // Lee todos los sensores de la columna activa
+void avanzarBarraRoja();                       // Mueve la barra roja un paso
+void verificarAccionesJugador();               // Evalúa si el jugador pisó algo
+void colocarCeldasVerdes();                    // Pone 1 o 2 celdas objetivo verdes al azar
+void dibujarLeds();                            // Actualiza los colores de todos los LEDs
 void colorearCelda(int f, int c, uint32_t color); // Pinta los 20 LEDs de una celda
-void dibujarBarraProgreso();                // Muestra el puntaje en los primeros 10 LEDs
-void iniciarPartida();                      // Prepara todo para una nueva partida
-void terminarPartida(bool gano);            // Cierra la partida y guarda estadísticas
-void resetearJuego();                       // Vuelve todo al estado inicial
-void animacionVictoria();                   // Efecto visual al ganar
-void animacionDerrota();                    // Efecto visual al perder
-void manejarBotones();                      // Lee los botones con debounce
-void configurarWifi();                      // Inicia el Access Point Wi-Fi
-void configurarServidorWeb();               // Registra las páginas del servidor
-void paginaPrincipal();                     // Muestra la página HTML con estadísticas
-void descargarCSV();                        // Envía el archivo CSV al navegador
-void estadoJSON();                          // Devuelve el estado del juego en formato JSON
-void inicializarSPIFFS();                   // Monta el sistema de archivos flash
-void guardarPartida(bool gano);             // Escribe una línea en el CSV
-String tiempoTranscurrido();                // Devuelve el tiempo desde el encendido
+int  calcularIndiceLed(int fila, int columna); // Calcula el índice del primer LED (serpenteante)
+void dibujarBarraProgreso();                   // Muestra el puntaje en los primeros 10 LEDs
+void iniciarPartida();                         // Prepara todo para una nueva partida
+void terminarPartida(bool gano);               // Cierra la partida y guarda estadísticas
+void resetearJuego();                          // Vuelve todo al estado inicial
+void animacionVictoria();                      // Efecto visual al ganar
+void animacionDerrota();                       // Efecto visual al perder
+void manejarBotones();                         // Lee los botones con debounce
+void configurarWifi();                         // Inicia el Access Point Wi-Fi
+void configurarServidorWeb();                  // Registra las páginas del servidor
+void paginaPrincipal();                        // Muestra la página HTML con estadísticas
+void descargarCSV();                           // Envía el archivo CSV al navegador
+void estadoJSON();                             // Devuelve el estado del juego en formato JSON
+void inicializarSPIFFS();                      // Monta el sistema de archivos flash
+void guardarPartida(bool gano);                // Escribe una línea en el CSV
+String tiempoTranscurrido();                   // Devuelve el tiempo desde el encendido
 
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -310,10 +346,10 @@ void setup() {
   // El número 115200 es la velocidad en baudios (bits por segundo).
   // Esto nos permite ver mensajes de depuración en el Monitor Serie de Arduino IDE.
   Serial.begin(115200);
-  Serial.println();                                      // Línea en blanco para separar
-  Serial.println(F("=== JuegoCapacitivoNeoPixel v2.0 ===")); // F() guarda el texto en flash
+  Serial.println();                                          // Línea en blanco para separar
+  Serial.println(F("=== JuegoCapacitivoNeoPixel v3.0 ===")); // F() guarda el texto en flash
   Serial.println(F("Grilla: 5 filas x 8 columnas = 40 celdas"));
-  Serial.println(F("Total de LEDs: 800"));
+  Serial.println(F("Total de LEDs: 800 — Distribucion: SERPENTEANTE por columna"));
 
   // ── Configurar pines del multiplexor como SALIDAS ──────────────────────
   //  OUTPUT significa que el ESP32 va a enviar señales por esos pines.
@@ -325,12 +361,9 @@ void setup() {
   digitalWrite(PIN_MUX_C, LOW);        // Iniciar en 0
 
   // ── Configurar pines de las filas como ENTRADAS ────────────────────────
-  //  INPUT significa que el ESP32 va a leer señales por esos pines.
-  //  INPUT_PULLDOWN activa una resistencia interna que mantiene el pin en LOW
-  //  cuando no hay señal, evitando lecturas erráticas.
+  //  INPUT_PULLDOWN activa la resistencia interna hacia GND.
+  //  GPIO34 y GPIO35 no tienen pull-down interno → se configuran solo INPUT.
   for (int f = 0; f < FILAS; f++) {
-    // GPIO 34 y 35 no tienen resistencia pull-down interna,
-    // así que se configuran solo como INPUT (usan la resistencia externa de 10 kΩ)
     if (pinesFila[f] == 34 || pinesFila[f] == 35) {
       pinMode(pinesFila[f], INPUT);            // Solo entrada, sin pull-down interno
     } else {
@@ -367,8 +400,8 @@ void setup() {
   configurarServidorWeb();
 
   // Mensaje final indicando que todo está listo
-  Serial.println(F("Sistema listo. Presioná BTN_INICIO para jugar."));
-  Serial.println(F("Conectate a la red 'JuegoNeoPixel' y entrá a http://192.168.4.1"));
+  Serial.println(F("Sistema listo. Presiona BTN_INICIO para jugar."));
+  Serial.println(F("Conectate a la red 'JuegoNeoPixel' y entra a http://192.168.4.1"));
 }
 
 
@@ -491,9 +524,9 @@ void manejarBotones() {
  */
 void seleccionarColumna(int columna) {
 
-  // Extraer cada bit de la columna usando desplazamiento de bits y máscara
-  // >> 0 desplaza 0 posiciones → toma el bit 0 (bit menos significativo)
-  // & 0x01 enmascara para quedarse solo con el bit que nos interesa
+  // Extraer cada bit de la columna usando desplazamiento de bits y máscara.
+  // >> 0 desplaza 0 posiciones → toma el bit 0 (bit menos significativo).
+  // & 0x01 enmascara para quedarse solo con el bit que nos interesa.
   digitalWrite(PIN_MUX_A, (columna >> 0) & 0x01);   // Bit 0 → pin A del multiplexor
   digitalWrite(PIN_MUX_B, (columna >> 1) & 0x01);   // Bit 1 → pin B del multiplexor
   digitalWrite(PIN_MUX_C, (columna >> 2) & 0x01);   // Bit 2 → pin C del multiplexor
@@ -530,8 +563,8 @@ void escanearSensores() {
 
   // Leer las 5 filas de esa columna
   for (int f = 0; f < FILAS; f++) {
-    // digitalRead devuelve HIGH (1) si el sensor detectó un toque, LOW (0) si no
-    // El sensor TTP223 pone la salida en HIGH cuando alguien lo toca
+    // digitalRead devuelve HIGH (1) si el sensor detectó un toque, LOW (0) si no.
+    // El sensor TTP223 pone la salida en HIGH cuando alguien lo toca.
     sensorPresionado[f][columnaEscaneo] = (digitalRead(pinesFila[f]) == HIGH);
   }
 
@@ -604,7 +637,7 @@ void verificarAccionesJugador() {
 
       // ── Caso 1: El jugador pisó la columna donde está la barra roja ──
       if (c == columnaRoja) {
-        Serial.printf("💥 Derrota: sensor [%d][%d] pisado bajo la barra roja\n", f, c);
+        Serial.printf("DERROTA: sensor [%d][%d] pisado bajo la barra roja\n", f, c);
         terminarPartida(false);   // false = el jugador perdió
         return;                   // Salir de la función inmediatamente
       }
@@ -613,7 +646,7 @@ void verificarAccionesJugador() {
       if (celdaEsVerde[f][c]) {
         celdaEsVerde[f][c] = false;   // Desactivar el objetivo (ya fue pisado)
         puntajeActual++;               // Sumar un punto al jugador
-        Serial.printf("✅ Punto! Celda [%d][%d] — Puntaje: %d\n", f, c, puntajeActual);
+        Serial.printf("Punto! Celda [%d][%d] — Puntaje: %d\n", f, c, puntajeActual);
 
         // Verificar si el jugador ya alcanzó los 10 puntos para ganar
         if (puntajeActual >= PUNTOS_PARA_GANAR) {
@@ -624,8 +657,8 @@ void verificarAccionesJugador() {
         // Subir el nivel de dificultad cada 2 puntos (máximo nivel 10)
         nivelActual = min(10, 1 + puntajeActual / 2);
 
-        // Recalcular el intervalo del barrido: más puntos = más rápido
-        // max() asegura que no bajemos del mínimo configurado
+        // Recalcular el intervalo del barrido: más puntos = más rápido.
+        // max() asegura que no bajemos del mínimo configurado.
         intervaloBarrido = (unsigned long) max(
           (long) VELOCIDAD_MINIMA_MS,
           (long)(VELOCIDAD_INICIAL_MS - (long)(nivelActual - 1) * REDUCCION_POR_NIVEL)
@@ -693,13 +726,92 @@ void colocarCeldasVerdes() {
     // ¡Todo bien! Colocar la celda verde aquí
     celdaEsVerde[f][c] = true;   // Marcar esta celda como objetivo
     colocadas++;                   // Contar la celda colocada
-    Serial.printf("🎯 Nueva celda verde en [%d][%d]\n", f, c);
+    Serial.printf("Nueva celda verde en [%d][%d]\n", f, c);
   }
 }
 
 
 // ═══════════════════════════════════════════════════════════════════════════
-//  SECCIÓN 16 — RENDERIZADO DE LEDs
+//  SECCIÓN 16 — CÁLCULO DE ÍNDICE LED (DISTRIBUCIÓN SERPENTEANTE)
+//
+//  ┌──────────────────────────────────────────────────────────────────────┐
+//  │  CONCEPTO CLAVE: ¿Qué es la distribución serpenteante?              │
+//  │                                                                      │
+//  │  En la versión anterior la tira recorría la grilla fila por fila:   │
+//  │    [0][0]→[0][1]→...→[0][7]  luego  [1][0]→[1][1]→...             │
+//  │  Esto obligaba a cortar y reconectar la tira entre el final de       │
+//  │  cada fila y el comienzo de la siguiente (8 cortes en total).        │
+//  │                                                                      │
+//  │  Con la distribución serpenteante la tira baja por la columna 0,    │
+//  │  llega al final (fila 4) y sube por la columna 1, luego baja por    │
+//  │  la columna 2, y así sucesivamente → cero cortes.                   │
+//  │                                                                      │
+//  │  Columnas PARES (0, 2, 4, 6): la tira BAJA (fila 0 → fila 4)       │
+//  │  Columnas IMPARES (1, 3, 5, 7): la tira SUBE (fila 4 → fila 0)     │
+//  │                                                                      │
+//  │  Diagrama de recorrido de la tira:                                  │
+//  │                                                                      │
+//  │   Col0↓  Col1↑  Col2↓  Col3↑  Col4↓  Col5↑  Col6↓  Col7↑         │
+//  │   [0][0] [4][1] [0][2] [4][3] [0][4] [4][5] [0][6] [4][7]         │
+//  │   [1][0] [3][1] [1][2] [3][3] [1][4] [3][5] [1][6] [3][7]         │
+//  │   [2][0] [2][1] [2][2] [2][3] [2][4] [2][5] [2][6] [2][7]         │
+//  │   [3][0] [1][1] [3][2] [1][3] [3][4] [1][5] [3][6] [1][7]         │
+//  │   [4][0] [0][1] [4][2] [0][3] [4][4] [0][5] [4][6] [0][7]         │
+//  │                                                                      │
+//  │  Tabla de índices de celdas (número de celda física en la cadena):  │
+//  │                                                                      │
+//  │         Col0  Col1  Col2  Col3  Col4  Col5  Col6  Col7             │
+//  │  Fila0:   0     9    10    19    20    29    30    39               │
+//  │  Fila1:   1     8    11    18    21    28    31    38               │
+//  │  Fila2:   2     7    12    17    22    27    32    37               │
+//  │  Fila3:   3     6    13    16    23    26    33    36               │
+//  │  Fila4:   4     5    14    15    24    25    34    35               │
+//  │                                                                      │
+//  └──────────────────────────────────────────────────────────────────────┘
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * @brief Calcula el índice del primer LED de una celda en la cadena serpenteante.
+ *
+ * La tira recorre las columnas en zigzag:
+ *  - Columnas pares  (0, 2, 4, 6): bajan de fila 0 a fila 4.
+ *  - Columnas impares (1, 3, 5, 7): suben de fila 4 a fila 0.
+ *
+ * Fórmula para columna par   (columna % 2 == 0):
+ *   nro_celda = columna * FILAS + fila
+ *
+ * Fórmula para columna impar (columna % 2 != 0):
+ *   nro_celda = columna * FILAS + (FILAS - 1 - fila)
+ *   → El +1 en columna ya mete 5 celdas; dentro de esa columna
+ *     la fila 0 queda al final y la fila 4 al principio.
+ *
+ * @param fila    Fila lógica de la celda (0 a FILAS-1).
+ * @param columna Columna lógica de la celda (0 a COLS-1).
+ * @return Índice del primer LED de esa celda en la tira (0 a TOTAL_LEDS-1).
+ */
+int calcularIndiceLed(int fila, int columna) {
+
+  int numeroCelda;   // Número de orden de la celda en la cadena física (0 a 39)
+
+  if (columna % 2 == 0) {
+    // ── Columna PAR: la tira baja (fila 0 es la primera en esa columna) ──
+    // Cada columna ocupa FILAS=5 celdas consecutivas en la tira.
+    // Dentro de una columna par, la posición dentro del grupo es igual a la fila.
+    numeroCelda = columna * FILAS + fila;
+  } else {
+    // ── Columna IMPAR: la tira sube (fila 4 es la primera en esa columna) ──
+    // Dentro de una columna impar, la fila 4 ocupa la posición 0 del grupo
+    // y la fila 0 ocupa la posición 4. Por eso invertimos con (FILAS-1-fila).
+    numeroCelda = columna * FILAS + (FILAS - 1 - fila);
+  }
+
+  // Multiplicar por LEDS_POR_CELDA=20 para obtener el índice del primer LED
+  return numeroCelda * LEDS_POR_CELDA;
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  SECCIÓN 17 — RENDERIZADO DE LEDs
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
@@ -750,68 +862,73 @@ void dibujarLeds() {
 /**
  * @brief Pinta los LEDs de una celda de la grilla con un color sólido.
  *
- * Calcula el índice del primer LED de la celda dentro de la cadena total
- * y aplica el color a los LEDS_POR_CELDA LEDs de esa celda.
+ * Delega el cálculo del índice físico a calcularIndiceLed(), que implementa
+ * la lógica serpenteante. Esto desacopla el "dónde está la celda en la tira"
+ * del "qué color ponerle", haciendo el código más fácil de mantener.
  *
- * Las celdas están ordenadas de izquierda a derecha, de arriba hacia abajo:
- *   Celda [0][0] → LEDs 0-19
- *   Celda [0][1] → LEDs 20-39
+ * Distribución serpenteante (ver calcularIndiceLed para el diagrama completo):
+ *   Celda [0][0] → LEDs   0 –  19  (col 0, baja, primera celda)
+ *   Celda [4][0] → LEDs  80 –  99  (col 0, baja, última celda)
+ *   Celda [4][1] → LEDs 100 – 119  (col 1, sube, primera celda física)
+ *   Celda [0][1] → LEDs 180 – 199  (col 1, sube, última celda física)
+ *   Celda [0][2] → LEDs 200 – 219  (col 2, baja, primera celda)
  *   ...
- *   Celda [0][7] → LEDs 140-159
- *   Celda [1][0] → LEDs 160-179
- *   ...
- *   Celda [4][7] → LEDs 780-799
+ *   Celda [4][7] → LEDs 780 – 799  (col 7, sube, primera celda física)
  *
- * @param f     Fila de la celda (0 a 4).
- * @param c     Columna de la celda (0 a 7).
+ * @param f     Fila lógica de la celda (0 a FILAS-1).
+ * @param c     Columna lógica de la celda (0 a COLS-1).
  * @param color Color en formato uint32_t (usar tira.Color(R, G, B)).
  */
 void colorearCelda(int f, int c, uint32_t color) {
 
-  // Calcular en qué número de celda estamos dentro de la cadena de 40 celdas
-  int numeroCelda = f * COLS + c;   // Ej: fila 2, columna 3 → celda nro 19
-
-  // Calcular el índice del primer LED de esa celda
-  int primerLed = numeroCelda * LEDS_POR_CELDA;   // Ej: celda 19 → LED 380
+  // Obtener el índice del primer LED de esta celda usando el mapa serpenteante
+  int primerLed = calcularIndiceLed(f, c);
 
   // Asignar el color a cada uno de los 20 LEDs de la celda
   for (int led = 0; led < LEDS_POR_CELDA; led++) {
-    tira.setPixelColor(primerLed + led, color);   // Asignar color al LED
+    tira.setPixelColor(primerLed + led, color);   // Asignar color al LED individual
   }
 }
 
 /**
  * @brief Muestra el puntaje del jugador en los primeros 10 LEDs de la cadena.
  *
- * Los LEDs 0 al 9 forman la barra de progreso.
- * Cada punto ganado enciende un LED con un color progresivo.
- * Los LEDs 10 al 19 se apagan para no interferir con la barra de progreso.
+ * Los LEDs 0 al 9 de la celda [0][0] forman la barra de progreso.
+ * Gracias a la distribución serpenteante, la celda [0][0] sigue siendo
+ * la primera de la tira (columna 0 es par → baja → fila 0 es la primera),
+ * por lo que el índice del primer LED de [0][0] es siempre 0.
  *
- * Estos LEDs pertenecen a la celda [0][0], que comparte espacio
- * con el primer cuadro de la grilla.
+ * Cada punto ganado enciende un LED con un color progresivo.
+ * Los LEDs 10 al 19 de esa celda se apagan para separar visualmente
+ * la barra de progreso del resto de la grilla.
  */
 void dibujarBarraProgreso() {
+
+  // Obtener el índice del primer LED de la celda [0][0]
+  // Con la distribución serpenteante esto siempre da 0, pero lo calculamos
+  // explícitamente para que el código sea claro y reutilizable.
+  int baseBarra = calcularIndiceLed(0, 0);   // Índice del primer LED de [0][0]
 
   // Encender un LED por cada punto que tiene el jugador
   for (int i = 0; i < PUNTOS_PARA_GANAR; i++) {
     if (i < puntajeActual) {
       // El jugador ya ganó este punto → encender con el color de progreso
-      tira.setPixelColor(i, coloresProgreso[i]);
+      tira.setPixelColor(baseBarra + i, coloresProgreso[i]);
     } else {
       // El jugador todavía no llegó a este punto → apagar el LED
-      tira.setPixelColor(i, 0);   // 0 = negro = apagado
+      tira.setPixelColor(baseBarra + i, 0);   // 0 = negro = apagado
     }
   }
 
-  // Apagar los LEDs 10 a 15 de la primera celda (los que no son de progreso)
+  // Apagar los LEDs 10 a 19 de la primera celda (los que no son de progreso)
   for (int i = PUNTOS_PARA_GANAR; i < LEDS_POR_CELDA; i++) {
-    tira.setPixelColor(i, 0);   // Apagar
+    tira.setPixelColor(baseBarra + i, 0);   // Apagar para no interferir con el juego
   }
 }
 
 
 // ═══════════════════════════════════════════════════════════════════════════
-//  SECCIÓN 17 — GESTIÓN DE PARTIDAS
+//  SECCIÓN 18 — GESTIÓN DE PARTIDAS
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
@@ -822,7 +939,7 @@ void dibujarBarraProgreso() {
  */
 void iniciarPartida() {
 
-  Serial.println(F("▶ Iniciando nueva partida..."));
+  Serial.println(F("Iniciando nueva partida..."));
 
   // Reiniciar todas las variables del juego a sus valores iniciales
   puntajeActual     = 0;                    // Sin puntos
@@ -868,7 +985,7 @@ void terminarPartida(bool gano) {
 
   // Mostrar resultado en el Monitor Serie
   Serial.printf("%s — Puntaje final: %d puntos — Nivel: %d\n",
-    gano ? "🏆 VICTORIA" : "💀 DERROTA",
+    gano ? "VICTORIA" : "DERROTA",
     puntajeActual,
     nivelActual
   );
@@ -882,7 +999,7 @@ void terminarPartida(bool gano) {
  */
 void resetearJuego() {
 
-  Serial.println(F("⟳ Sistema reseteado por el jugador"));
+  Serial.println(F("Sistema reseteado por el jugador"));
 
   // Volver al estado de espera
   estadoActual = ESTADO_INACTIVO;
@@ -905,7 +1022,7 @@ void resetearJuego() {
 
 
 // ═══════════════════════════════════════════════════════════════════════════
-//  SECCIÓN 18 — ANIMACIONES
+//  SECCIÓN 19 — ANIMACIONES
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
@@ -914,15 +1031,17 @@ void resetearJuego() {
  * Enciende las columnas de verde una por una para crear el efecto
  * de "ola verde". Luego parpadea toda la grilla 3 veces.
  * Durante la animación se siguen atendiendo las peticiones web.
+ * Usa colorearCelda() internamente, por lo que respeta automáticamente
+ * la distribución serpenteante sin ningún cambio adicional.
  */
 void animacionVictoria() {
 
-  Serial.println(F("🏆 Animación de victoria"));
+  Serial.println(F("Animacion de victoria"));
 
   // Barrer columna por columna de izquierda a derecha
   for (int c = 0; c < COLS; c++) {
     for (int f = 0; f < FILAS; f++) {
-      colorearCelda(f, c, tira.Color(0, 255, 0));   // Verde puro
+      colorearCelda(f, c, tira.Color(0, 255, 0));   // Verde puro en cada celda
     }
     tira.show();               // Mostrar el avance de la ola
     servidor.handleClient();   // Atender la web mientras esperamos
@@ -962,10 +1081,11 @@ void animacionVictoria() {
  *
  * Enciende toda la grilla en rojo y parpadea 4 veces para indicar
  * claramente que el jugador fue alcanzado por la barra roja.
+ * Usa colorearCelda() internamente, respetando la distribución serpenteante.
  */
 void animacionDerrota() {
 
-  Serial.println(F("💀 Animación de derrota"));
+  Serial.println(F("Animacion de derrota"));
 
   // Parpadear toda la grilla en rojo 4 veces
   for (int rep = 0; rep < 4; rep++) {
@@ -993,7 +1113,7 @@ void animacionDerrota() {
 
 
 // ═══════════════════════════════════════════════════════════════════════════
-//  SECCIÓN 19 — Wi-Fi (MODO ACCESS POINT)
+//  SECCIÓN 20 — Wi-Fi (MODO ACCESS POINT)
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
@@ -1027,7 +1147,7 @@ void configurarWifi() {
 
 
 // ═══════════════════════════════════════════════════════════════════════════
-//  SECCIÓN 20 — SERVIDOR WEB
+//  SECCIÓN 21 — SERVIDOR WEB
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
@@ -1055,7 +1175,7 @@ void configurarServidorWeb() {
  * @brief Genera y envía la página HTML principal con el historial de partidas.
  *
  * Lee el archivo CSV de SPIFFS y construye una tabla HTML con los datos.
- * También muestra estadísticas del juego actual.
+ * También muestra estadísticas del juego actual y la versión del firmware.
  */
 void paginaPrincipal() {
 
@@ -1074,8 +1194,8 @@ void paginaPrincipal() {
 
         if (linea.isEmpty()) continue;   // Saltar líneas vacías
 
-        // Separar los campos de la línea CSV por coma
-        // Los campos son: Partida, Tiempo, Puntaje, Resultado, Nivel
+        // Separar los campos de la línea CSV por coma.
+        // Los campos son: Partida, Tiempo, Puntaje, Resultado, Nivel.
         String campos[5];
         int cantCampos = 0;
         int inicio = 0;
@@ -1103,14 +1223,14 @@ void paginaPrincipal() {
     }
   } else {
     // No hay archivo todavía
-    filas = "<tr><td colspan='5'>Todavía no se jugó ninguna partida.</td></tr>";
+    filas = "<tr><td colspan='5'>Todavia no se jugo ninguna partida.</td></tr>";
   }
 
   // Traducir el estado actual a texto legible
   const char* textoEstado[] = { "Esperando jugador", "Jugando", "Victoria", "Derrota" };
 
-  // Construir el documento HTML completo
-  // F() guarda el texto en la memoria flash para no ocupar la RAM del ESP32
+  // Construir el documento HTML completo.
+  // F() guarda el texto en la memoria flash para no ocupar la RAM del ESP32.
   String html = "";
   html += F("<!DOCTYPE html><html lang='es'>");
   html += F("<head><meta charset='UTF-8'>");
@@ -1137,7 +1257,8 @@ void paginaPrincipal() {
   html += F("</style></head><body>");
 
   html += F("<h1>&#127918; Juego Capacitivo NeoPixel</h1>");
-  html += F("<p class='sub'>Grilla 5 &times; 8 &mdash; 800 LEDs WS2812B &mdash; ESP32 Access Point</p>");
+  html += F("<p class='sub'>Grilla 5 &times; 8 &mdash; 800 LEDs WS2812B &mdash; ");
+  html += F("Distribuci&oacute;n serpenteante &mdash; ESP32 Access Point</p>");
 
   // Tarjetas de estadísticas
   html += F("<div class='stats'>");
@@ -1175,7 +1296,8 @@ void paginaPrincipal() {
 
   // Pie de página
   html += F("<footer><p>P&aacute;gina se actualiza cada 10 segundos &mdash; ");
-  html += F("<a href='/' style='color:#475569'>Actualizar ahora</a></p></footer>");
+  html += F("<a href='/' style='color:#475569'>Actualizar ahora</a></p>");
+  html += F("<p>Firmware v3.0 — distribuci&oacute;n serpenteante por columna</p></footer>");
 
   html += F("</body></html>");
 
@@ -1222,7 +1344,8 @@ void descargarCSV() {
  * para intercambiar datos entre sistemas. Es fácil de leer y procesar.
  *
  * Ejemplo de respuesta:
- *   {"estado":"jugando","puntaje":3,"nivel":2,"columnaRoja":5,"partidas":7,"velocidadMs":360}
+ *   {"estado":"jugando","puntaje":3,"nivel":2,"columnaRoja":5,
+ *    "partidas":7,"velocidadMs":360,"filas":5,"columnas":8,"totalLeds":800}
  */
 void estadoJSON() {
 
@@ -1251,7 +1374,7 @@ void estadoJSON() {
 
 
 // ═══════════════════════════════════════════════════════════════════════════
-//  SECCIÓN 21 — SPIFFS (Sistema de Archivos en la Memoria Flash)
+//  SECCIÓN 22 — SPIFFS (Sistema de Archivos en la Memoria Flash)
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
@@ -1363,33 +1486,52 @@ String tiempoTranscurrido() {
 //  FIN DEL CÓDIGO
 // ═══════════════════════════════════════════════════════════════════════════
 /*
- * ┌──────────────────────────────────────────────────────────────────────┐
- * │           TABLA COMPLETA DE ASIGNACIÓN DE PINES GPIO                │
- * ├──────────────────────┬──────────┬───────────────────────────────────┤
- * │ Función              │ GPIO     │ Notas                             │
- * ├──────────────────────┼──────────┼───────────────────────────────────┤
- * │ MUX — bit A          │ GPIO  4  │ Salida digital                    │
- * │ MUX — bit B          │ GPIO  5  │ Salida digital                    │
- * │ MUX — bit C          │ GPIO 18  │ Salida digital                    │
- * │ Fila 0 (lectura)     │ GPIO 34  │ Solo entrada — pull-down externo  │
- * │ Fila 1 (lectura)     │ GPIO 35  │ Solo entrada — pull-down externo  │
- * │ Fila 2 (lectura)     │ GPIO 32  │ Entrada + pull-down interno       │
- * │ Fila 3 (lectura)     │ GPIO 33  │ Entrada + pull-down interno       │
- * │ Fila 4 (lectura)     │ GPIO 25  │ Entrada + pull-down interno       │
- * │ NeoPixel DIN         │ GPIO 26  │ Resistor 470 Ω en serie           │
- * │ Botón INICIO         │ GPIO 27  │ Pull-down 10 kΩ externo           │
- * │ Botón RESET          │ GPIO 15  │ Pull-down 10 kΩ externo           │
- * ├──────────────────────┴──────────┴───────────────────────────────────┤
- * │ RESUMEN DE LA GRILLA                                                │
- * │  Filas: 5  —  Columnas: 8  —  Total celdas: 40                     │
- * │  LEDs por celda: 20  —  Total de LEDs: 800                         │
- * │  Corriente máxima (100% blanco): 800 × 60 mA = 48.0 A              │
- * │  Corriente con brillo al 30%:    800 × 60 mA × 0.30 ≈ 14.4 A      │
- * │  Fuente recomendada: 5 V / 15 A o más                              │
- * ├──────────────────────────────────────────────────────────────────────┤
- * │ MAPA DE ÍNDICES DE LEDs (primera celda de cada fila)               │
- * │  [0][0] → LEDs   0-19    [1][0] → LEDs 160-179                     │
- * │  [0][1] → LEDs  20-39    [2][0] → LEDs 320-339                     │
- * │  [0][7] → LEDs 140-159   [4][7] → LEDs 780-799                     │
- * └──────────────────────────────────────────────────────────────────────┘
+ * ┌──────────────────────────────────────────────────────────────────────────┐
+ * │           TABLA COMPLETA DE ASIGNACIÓN DE PINES GPIO                    │
+ * ├──────────────────────┬──────────┬─────────────────────────────────────── ┤
+ * │ Función              │ GPIO     │ Notas                                  │
+ * ├──────────────────────┼──────────┼────────────────────────────────────────┤
+ * │ MUX — bit A          │ GPIO  4  │ Salida digital                         │
+ * │ MUX — bit B          │ GPIO  5  │ Salida digital                         │
+ * │ MUX — bit C          │ GPIO 18  │ Salida digital                         │
+ * │ Fila 0 (lectura)     │ GPIO 34  │ Solo entrada — pull-down externo       │
+ * │ Fila 1 (lectura)     │ GPIO 35  │ Solo entrada — pull-down externo       │
+ * │ Fila 2 (lectura)     │ GPIO 32  │ Entrada + pull-down interno            │
+ * │ Fila 3 (lectura)     │ GPIO 33  │ Entrada + pull-down interno            │
+ * │ Fila 4 (lectura)     │ GPIO 25  │ Entrada + pull-down interno            │
+ * │ NeoPixel DIN         │ GPIO 26  │ Resistor 470 Ω en serie                │
+ * │ Botón INICIO         │ GPIO 27  │ Pull-down 10 kΩ externo                │
+ * │ Botón RESET          │ GPIO 15  │ Pull-down 10 kΩ externo                │
+ * ├──────────────────────┴──────────┴────────────────────────────────────────┤
+ * │ MAPA DE ÍNDICES LED — DISTRIBUCIÓN SERPENTEANTE POR COLUMNA             │
+ * │                                                                          │
+ * │  La tira recorre las columnas en zigzag sin cortes:                      │
+ * │    Col 0 BAJA (fila 0→4), Col 1 SUBE (fila 4→0),                        │
+ * │    Col 2 BAJA (fila 0→4), ...  Col 7 SUBE (fila 4→0)                    │
+ * │                                                                          │
+ * │  TABLA: índice de celda física (× 20 = primer LED)                      │
+ * │                                                                          │
+ * │         Col0  Col1  Col2  Col3  Col4  Col5  Col6  Col7                  │
+ * │  Fila0:   0     9    10    19    20    29    30    39                    │
+ * │  Fila1:   1     8    11    18    21    28    31    38                    │
+ * │  Fila2:   2     7    12    17    22    27    32    37                    │
+ * │  Fila3:   3     6    13    16    23    26    33    36                    │
+ * │  Fila4:   4     5    14    15    24    25    34    35                    │
+ * │                                                                          │
+ * │  Ejemplos de primer LED por celda (índice celda × 20):                  │
+ * │   [0][0] → celda  0 → LED   0    [4][0] → celda  4 → LED  80           │
+ * │   [4][1] → celda  5 → LED 100    [0][1] → celda  9 → LED 180           │
+ * │   [0][2] → celda 10 → LED 200    [4][7] → celda 35 → LED 700           │
+ * │   [0][7] → celda 39 → LED 780    [4][7] → celda 35 → LED 700 (*)       │
+ * │  (*) Col 7 es impar → sube: fila 4 es la primera de esa columna         │
+ * │                                                                          │
+ * │  BARRA DE PROGRESO: LEDs 0–9 de la celda [0][0] (índice físico 0)       │
+ * ├──────────────────────────────────────────────────────────────────────────┤
+ * │ RESUMEN DE LA GRILLA                                                     │
+ * │  Filas: 5  —  Columnas: 8  —  Total celdas: 40                          │
+ * │  LEDs por celda: 20  —  Total de LEDs: 800                              │
+ * │  Corriente máxima (100% blanco): 800 × 60 mA = 48.0 A                   │
+ * │  Corriente con brillo al 30%:    800 × 60 mA × 0.30 ≈ 14.4 A           │
+ * │  Fuente recomendada: 5 V / 15 A o más                                   │
+ * └──────────────────────────────────────────────────────────────────────────┘
  */
